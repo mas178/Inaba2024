@@ -16,13 +16,19 @@ function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
 
     df = df[df.generation.%skip.==0, :]
 
-    p3 = plot(xl = "Generation", title = "Network Attributes")
+    p3 = plot(xl = "Generation", title = "Network Attributes (Weak)")
     plot!(df.generation, df.weight_μ, ribbon = df.weight_σ, fillalpha = 0.5, label = "Weight")
     plot!(df.generation, df.L, label = "L")
     plot!(df.generation, df.C, label = "C")
     plot!(twinx(), df.generation, df.k, label = "<k>", line = :dash)
 
-    p4 = plot(xl = "Generation", title = "Component Attributes")
+    p4 = plot(xl = "Generation", title = "Network Attributes (Strong)")
+    plot!(df.generation, df.weight_μ, ribbon = df.weight_σ, fillalpha = 0.5, label = "Weight")
+    plot!(df.generation, df.strong_L, label = "L")
+    plot!(df.generation, df.strong_C, label = "C")
+    plot!(twinx(), df.generation, df.strong_k, label = "<k>", line = :dash)
+
+    p5 = plot(xl = "Generation", title = "Component Attributes (Weak)")
     plot!(
         df.generation,
         df.component_size_μ,
@@ -33,6 +39,17 @@ function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
     plot!(df.generation, df.component_size_max, label = "Size (Max)")
     plot!(twinx(), df.generation, df.component_count, label = "Count", line = :dash, yscale = :log10)
 
+    p6 = plot(xl = "Generation", title = "Component Attributes (Strong)")
+    plot!(
+        df.generation,
+        df.strong_component_size_μ,
+        ribbon = (df.strong_component_size_μ - df.strong_component_size_min, df.strong_component_size_σ),
+        fillalpha = 0.5,
+        label = "Size",
+    )
+    plot!(df.generation, df.strong_component_size_max, label = "Size (Max)")
+    plot!(twinx(), df.generation, df.strong_component_count, label = "Count", line = :dash, yscale = :log10)
+
     params1 = join(["$(k) = $(v)" for (k, v) in pairs(df[1, [2, 3, 10, 11]])], ", ")
     params2 = join(["$(k) = $(v)" for (k, v) in pairs(df[1, 4:9])], ", ")
 
@@ -40,9 +57,11 @@ function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
         p1,
         p2,
         p3,
+        p5,
         p4,
-        layout = (2, 2),
-        size = (800, 800),
+        p6,
+        layout = (3, 2),
+        size = (800, 1200),
         bottom_margin = 6 * PlotMeasures.mm,
         suptitle = "$(params1)\n$(params2)",
         plot_titlefontsize = 10,

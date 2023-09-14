@@ -133,14 +133,7 @@ sigmoid_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 / (1.0 + exp(-δ * 
 
 function pick_deaths(model::Model, n::Int)::Vector{Int}
     neg_fitness_vec = sigmoid_fitness.(-model.payoff_vec, model.param.δ)
-    death_id_vec = []
-    try
-        death_id_vec = sample(model.param.rng, 1:model.N, Weights(neg_fitness_vec), n, replace = false)
-    catch e
-        @show model.N, n, size(neg_fitness_vec)
-        @show neg_fitness_vec
-        throw(e)
-    end
+    death_id_vec = sample(model.param.rng, 1:model.N, Weights(neg_fitness_vec), n, replace = false)
 
     return sort(death_id_vec)
 end
@@ -272,6 +265,14 @@ function make_output_df(param::Param)::DataFrame
     df.component_size_max .= Float16(0)
     df.component_size_min .= Float16(0)
     df.component_size_σ .= Float16(0)
+    df.strong_k .= Float16(0)
+    df.strong_L .= Float16(0)
+    df.strong_C .= Float16(0)
+    df.strong_component_count .= Float16(0)
+    df.strong_component_size_μ .= Float16(0)
+    df.strong_component_size_max .= Float16(0)
+    df.strong_component_size_min .= Float16(0)
+    df.strong_component_size_σ .= Float16(0)
 
     return df
 end
@@ -294,39 +295,61 @@ function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10):
     weight_μ = mean(weight_vec)
     weight_σ = std(weight_vec)
 
-    simple_g = unweighted_graph(model.graph_weights, 0.5)  # costly
+    weak_connection_g = unweighted_graph(model.graph_weights, 0.5)  # costly
+    strong_connection_g = unweighted_graph(model.graph_weights, 0.75)  # costly
 
     # 平均次数 (<k>)
-    _k = mean(degree(simple_g))
+    weak_k = mean(degree(weak_connection_g))
+    strong_k = mean(degree(strong_connection_g))
 
     # 平均距離 (L)
     # _L_vec = collect(Iterators.flatten([gdistances(simple_g, i) for i = 1:model.N]))  # most costly
-    _L_vec = []
+    L_vec = []
     @inbounds @simd for i = 1:model.N
-        append!(_L_vec, gdistances(simple_g, i))
+        append!(L_vec, gdistances(weak_connection_g, i))
     end
-    _L_vec = filter(x -> 0 < x <= model.N, _L_vec)
-    _L = length(_L_vec) > 0 ? mean(_L_vec) : 0.0
+    L_vec = filter(x -> 0 < x <= model.N, L_vec)
+    weak_L = length(L_vec) > 0 ? mean(L_vec) : 0.0
+
+    L_vec = []
+    @inbounds @simd for i = 1:model.N
+        append!(L_vec, gdistances(strong_connection_g, i))
+    end
+    L_vec = filter(x -> 0 < x <= model.N, L_vec)
+    strong_L = length(L_vec) > 0 ? mean(L_vec) : 0.0
 
     # 平均クラスタ係数 (C)
-    _C = mean(local_clustering_coefficient(simple_g, 1:model.N))  # costly
+    weak_C = mean(local_clustering_coefficient(weak_connection_g, 1:model.N))  # costly
+    strong_C = mean(local_clustering_coefficient(strong_connection_g, 1:model.N))  # costly
 
     # コンポーネント
-    _components = [length(_component) for _component in connected_components(simple_g)]
-    std_components = std(_components)
-    isnan(std_components) && (std_components = 0.0)
+    weak_components = [length(c) for c in connected_components(weak_connection_g)]
+    weak_std_components = std(weak_components)
+    isnan(weak_std_components) && (weak_std_components = 0.0)
+
+    strong_components = [length(c) for c in connected_components(strong_connection_g)]
+    strong_std_components = std(strong_components)
+    isnan(strong_std_components) && (strong_std_components = 0.0)
 
     output[generation, 17:end] = [
-        weight_μ,              # 17 重みの平均
-        weight_σ,              # 18 重みの標準偏差
-        _k,                    # 19 平均次数 <k>
-        _L,                    # 20 平均距離 (L)
-        _C,                    # 21 平均クラスタ係数 (C)
-        length(_components),   # 22 コンポーネント数
-        mean(_components) / model.N,     # 23 平均コンポーネントサイズ
-        maximum(_components) / model.N,  # 24 最大コンポーネントサイズ
-        minimum(_components) / model.N,  # 25 最小コンポーネントサイズ
-        std_components / model.N,        # 26 コンポーネントサイズの標準偏差
+        weight_μ,  # 17 重みの平均
+        weight_σ,  # 18 重みの標準偏差
+        weak_k,    # 19 平均次数 <k>
+        weak_L,    # 20 平均距離 (L)
+        weak_C,    # 21 平均クラスタ係数 (C)
+        length(weak_components),               # 22 コンポーネント数
+        mean(weak_components) / model.N,       # 23 平均コンポーネントサイズ
+        maximum(weak_components) / model.N,    # 24 最大コンポーネントサイズ
+        minimum(weak_components) / model.N,    # 25 最小コンポーネントサイズ
+        weak_std_components / model.N,         # 26 コンポーネントサイズの標準偏差
+        strong_k,  # 27 平均次数 <k>
+        strong_L,  # 28 平均距離 (L)
+        strong_C,  # 29 平均クラスタ係数 (C)
+        length(strong_components),             # 30 コンポーネント数
+        mean(strong_components) / model.N,     # 31 平均コンポーネントサイズ
+        maximum(strong_components) / model.N,  # 32 最大コンポーネントサイズ
+        minimum(strong_components) / model.N,  # 33 最小コンポーネントサイズ
+        strong_std_components / model.N,       # 34 コンポーネントサイズの標準偏差
     ]
 
     return

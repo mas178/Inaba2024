@@ -13,14 +13,14 @@ using .Simulation
 
 @kwdef struct ParamOptions
     initial_N_vec = [1_000]
-    T_vec = 0.0:0.2:2.0
-    S_vec = -1.0:0.2:1.0
+    T_vec = 0.7:0.2:1.3   # 0.0:0.2:2.0
+    S_vec = -0.3:0.2:0.3  # -1.0:0.2:1.0
     initial_graph_weight_vec = [0.2]
     interaction_freqency_vec = [1.0]
     relationship_volatility_vec = [0.1]
     δ_vec = [1.0]
     μ_vec = [0.01]
-    β_σ_vec = [(0.4, 0.4)]  # [(0.0, 0.0), (0.1, 0.1), (0.4, 0.4)]
+    β_σ_vec = [(0.0, 0.0), (0.1, 0.1), (0.4, 0.4)]  # [(0.0, 0.0), (0.1, 0.1), (0.4, 0.4)]
     generations_vec = [10_000]
 end
 
