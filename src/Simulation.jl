@@ -6,7 +6,7 @@ using LinearAlgebra
 using Random: MersenneTwister
 using StatsBase: mean, std, sample, Weights
 
-export Model, Param, Strategy, C, D, interaction!, death_and_birth!, log!, run_all, plot_output_df
+export Model, Param, Strategy, C, D, interaction!, death_and_birth!
 
 @enum Strategy C D
 
@@ -21,14 +21,15 @@ function ar1_model(
     β::Float64,        # 自己回帰の係数。|β| < 1 の場合に平均回帰性を持つ。μ = α / (1 - β)
     σ::Float64,        # std of white noise
     T::Int,            # time steps
-    μ::Float64 = 1.0,  # expected average value
+    μ::Float64,        # expected average value
+    rng::MersenneTwister,
 )::Vector{Float64}
     α = μ * (1 - β)    # 定数項。μから逆算する。
     x = Vector{Float64}(undef, T + 1)
     x[1] = μ
 
     for t = 1:T
-        ϵ = σ * randn()  # white noise
+        ϵ = σ * randn(rng)  # white noise
         x[t+1] = clamp(α + β * x[t] + ϵ, 0.0, 2.0)
     end
 
@@ -67,7 +68,7 @@ mutable struct Model
             fill(0.0, p.initial_N),
             (fill(1.0, (p.initial_N, p.initial_N)) - Matrix(I, p.initial_N, p.initial_N)) * p.initial_graph_weight,
             Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, p.T), (D, C) => (p.T, p.S), (D, D) => (0.0, 0.0)),
-            ar1_model(p.β, p.σ, round(Int, p.generations / 10)),
+            ar1_model(p.β, p.σ, round(Int, p.generations / 10), 1.0, p.rng),
             p,
         )
     end
@@ -180,6 +181,9 @@ function death_and_birth!(model::Model, generation::Int)::Tuple{Vector{Int},Vect
     n_deaths = round(Int, model.N * get_death_rate(model, generation))
     n_births = round(Int, model.N * model.param.birth_rate)
 
+    death_id_vec = []
+    parent_id_vec = []
+
     # death
     if model.N - n_deaths > model.param.initial_N / 2
         death_id_vec = pick_deaths(model, n_deaths)
@@ -196,8 +200,6 @@ function death_and_birth!(model::Model, generation::Int)::Tuple{Vector{Int},Vect
             end
         end
         model.graph_weights = _new_weights
-    else
-        death_id_vec = []
     end
 
     # birth
@@ -238,135 +240,9 @@ function death_and_birth!(model::Model, generation::Int)::Tuple{Vector{Int},Vect
         model.graph_weights = _new_weights
 
         normalize_graph_weights!(model)
-    else
-        parent_id_vec = []
     end
 
     return death_id_vec, parent_id_vec
-end
-
-function make_output_df(param::Param)::DataFrame
-    df = DataFrame([param])
-    select!(df, Not([:generations, :rng]))
-    df = repeat(df, param.generations)
-
-    df.generation .= Int16(0)
-    df.N .= Int16(0)
-    df.cooperation_rate .= Float16(0)
-    df.payoff_μ .= Float16(0)
-    df.death_rate .= Float16(0)
-    df.weight_μ .= Float16(0)
-    df.weight_σ .= Float16(0)
-    df.k .= Float16(0)
-    df.L .= Float16(0)
-    df.C .= Float16(0)
-    df.component_count .= Float16(0)
-    df.component_size_μ .= Float16(0)
-    df.component_size_max .= Float16(0)
-    df.component_size_min .= Float16(0)
-    df.component_size_σ .= Float16(0)
-    df.strong_k .= Float16(0)
-    df.strong_L .= Float16(0)
-    df.strong_C .= Float16(0)
-    df.strong_component_count .= Float16(0)
-    df.strong_component_size_μ .= Float16(0)
-    df.strong_component_size_max .= Float16(0)
-    df.strong_component_size_min .= Float16(0)
-    df.strong_component_size_σ .= Float16(0)
-
-    return df
-end
-
-unweighted_graph(graph_weights::Matrix, threshold::Float64)::SimpleGraph = SimpleGraph(graph_weights .> threshold)
-
-function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10)::Nothing
-    output[generation, 12:16] = [
-        generation,
-        model.N,                            # population
-        mean(model.strategy_vec .== C),     # 協力率
-        mean(model.payoff_vec),             # 平均ペイオフ
-        get_death_rate(model, generation),  # 死亡率
-    ]
-
-    (generation % skip != 0) && return
-
-    # 重みベクトル
-    weight_vec = [Float64(model.graph_weights[i, j]) for i = 1:model.N for j in 1:model.N if i < j]  # costly
-    weight_μ = mean(weight_vec)
-    weight_σ = std(weight_vec)
-
-    weak_connection_g = unweighted_graph(model.graph_weights, 0.5)  # costly
-    strong_connection_g = unweighted_graph(model.graph_weights, 0.75)  # costly
-
-    # 平均次数 (<k>)
-    weak_k = mean(degree(weak_connection_g))
-    strong_k = mean(degree(strong_connection_g))
-
-    # 平均距離 (L)
-    # _L_vec = collect(Iterators.flatten([gdistances(simple_g, i) for i = 1:model.N]))  # most costly
-    L_vec = []
-    @inbounds @simd for i = 1:model.N
-        append!(L_vec, gdistances(weak_connection_g, i))
-    end
-    L_vec = filter(x -> 0 < x <= model.N, L_vec)
-    weak_L = length(L_vec) > 0 ? mean(L_vec) : 0.0
-
-    L_vec = []
-    @inbounds @simd for i = 1:model.N
-        append!(L_vec, gdistances(strong_connection_g, i))
-    end
-    L_vec = filter(x -> 0 < x <= model.N, L_vec)
-    strong_L = length(L_vec) > 0 ? mean(L_vec) : 0.0
-
-    # 平均クラスタ係数 (C)
-    weak_C = mean(local_clustering_coefficient(weak_connection_g, 1:model.N))  # costly
-    strong_C = mean(local_clustering_coefficient(strong_connection_g, 1:model.N))  # costly
-
-    # コンポーネント
-    weak_components = [length(c) for c in connected_components(weak_connection_g)]
-    weak_std_components = std(weak_components)
-    isnan(weak_std_components) && (weak_std_components = 0.0)
-
-    strong_components = [length(c) for c in connected_components(strong_connection_g)]
-    strong_std_components = std(strong_components)
-    isnan(strong_std_components) && (strong_std_components = 0.0)
-
-    output[generation, 17:end] = [
-        weight_μ,  # 17 重みの平均
-        weight_σ,  # 18 重みの標準偏差
-        weak_k,    # 19 平均次数 <k>
-        weak_L,    # 20 平均距離 (L)
-        weak_C,    # 21 平均クラスタ係数 (C)
-        length(weak_components),               # 22 コンポーネント数
-        mean(weak_components) / model.N,       # 23 平均コンポーネントサイズ
-        maximum(weak_components) / model.N,    # 24 最大コンポーネントサイズ
-        minimum(weak_components) / model.N,    # 25 最小コンポーネントサイズ
-        weak_std_components / model.N,         # 26 コンポーネントサイズの標準偏差
-        strong_k,  # 27 平均次数 <k>
-        strong_L,  # 28 平均距離 (L)
-        strong_C,  # 29 平均クラスタ係数 (C)
-        length(strong_components),             # 30 コンポーネント数
-        mean(strong_components) / model.N,     # 31 平均コンポーネントサイズ
-        maximum(strong_components) / model.N,  # 32 最大コンポーネントサイズ
-        minimum(strong_components) / model.N,  # 33 最小コンポーネントサイズ
-        strong_std_components / model.N,       # 34 コンポーネントサイズの標準偏差
-    ]
-
-    return
-end
-
-function run(param::Param)::DataFrame
-    model = Model(param)
-    model.strategy_vec = rand(model.param.rng, [C, D], model.param.initial_N)
-    output_df = make_output_df(param)
-
-    for generation = 1:model.param.generations
-        interaction!(model)
-        death_and_birth!(model, generation)
-        log!(output_df, generation, model)
-    end
-
-    return output_df
 end
 
 end  # end of module
