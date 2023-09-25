@@ -7,96 +7,95 @@ using StatsBase: mean, std
 include("../src/Simulation.jl")
 using .Simulation
 
+const WEAK_THRESHOLD = 0.25
+const MEDIUM_THRESHOLD = 0.50
+const STRONG_THRESHOLD = 0.75
+
+function initialize_column!(df::DataFrame, columns::Vector{Symbol}, value = Float16(0))
+    for column in columns
+        df[!, column] .= value
+    end
+end
+
 function make_output_df(param::Param)::DataFrame
     df = DataFrame([param])
     select!(df, Not([:generations, :rng]))
     df = repeat(df, param.generations)
 
-    df.generation .= Int16(0)
-    df.N .= Int16(0)
-    df.cooperation_rate .= Float16(0)
-    df.payoff_μ .= Float16(0)
-    df.death_rate .= Float16(0)
-    df.weight_μ .= Float16(0)
-    df.weight_σ .= Float16(0)
+    initialize_column!(df, [:generation, :N], Int16(0))
+    initialize_column!(
+        df,
+        [
+            :cooperation_rate,
+            :payoff_μ,
+            :death_rate,
+            :weight_μ,
+            :weight_σ,
 
-    # weak connection (19〜31)
-    df.weak_k .= Float16(0)
-    df.weak_L .= Float16(0)
-    df.weak_C .= Float16(0)
-    df.weak_component1_count .= Float16(0)
-    df.weak_component1_size_μ .= Float16(0)
-    df.weak_component1_size_max .= Float16(0)
-    df.weak_component1_size_min .= Float16(0)
-    df.weak_component1_size_σ .= Float16(0)
-    df.weak_component2_count .= Float16(0)
-    df.weak_component2_size_μ .= Float16(0)
-    df.weak_component2_size_max .= Float16(0)
-    df.weak_component2_size_min .= Float16(0)
-    df.weak_component2_size_σ .= Float16(0)
+            # weak connection (19〜31)
+            :weak_k,
+            :weak_L,
+            :weak_C,
+            :weak_component1_count,
+            :weak_component1_size_μ,
+            :weak_component1_size_max,
+            :weak_component1_size_min,
+            :weak_component1_size_σ,
+            :weak_component2_count,
+            :weak_component2_size_μ,
+            :weak_component2_size_max,
+            :weak_component2_size_min,
+            :weak_component2_size_σ,
 
-    # medium connection (32〜44)
-    df.medium_k .= Float16(0)
-    df.medium_L .= Float16(0)
-    df.medium_C .= Float16(0)
-    df.medium_component1_count .= Float16(0)
-    df.medium_component1_size_μ .= Float16(0)
-    df.medium_component1_size_max .= Float16(0)
-    df.medium_component1_size_min .= Float16(0)
-    df.medium_component1_size_σ .= Float16(0)
-    df.medium_component2_count .= Float16(0)
-    df.medium_component2_size_μ .= Float16(0)
-    df.medium_component2_size_max .= Float16(0)
-    df.medium_component2_size_min .= Float16(0)
-    df.medium_component2_size_σ .= Float16(0)
+            # medium connection (32〜44)
+            :medium_k,
+            :medium_L,
+            :medium_C,
+            :medium_component1_count,
+            :medium_component1_size_μ,
+            :medium_component1_size_max,
+            :medium_component1_size_min,
+            :medium_component1_size_σ,
+            :medium_component2_count,
+            :medium_component2_size_μ,
+            :medium_component2_size_max,
+            :medium_component2_size_min,
+            :medium_component2_size_σ,
 
-    # strong connection (45〜57)
-    df.strong_k .= Float16(0)
-    df.strong_L .= Float16(0)
-    df.strong_C .= Float16(0)
-    df.strong_component1_count .= Float16(0)
-    df.strong_component1_size_μ .= Float16(0)
-    df.strong_component1_size_max .= Float16(0)
-    df.strong_component1_size_min .= Float16(0)
-    df.strong_component1_size_σ .= Float16(0)
-    df.strong_component2_count .= Float16(0)
-    df.strong_component2_size_μ .= Float16(0)
-    df.strong_component2_size_max .= Float16(0)
-    df.strong_component2_size_min .= Float16(0)
-    df.strong_component2_size_σ .= Float16(0)
+            # strong connection (45〜57)
+            :strong_k,
+            :strong_L,
+            :strong_C,
+            :strong_component1_count,
+            :strong_component1_size_μ,
+            :strong_component1_size_max,
+            :strong_component1_size_min,
+            :strong_component1_size_σ,
+            :strong_component2_count,
+            :strong_component2_size_μ,
+            :strong_component2_size_max,
+            :strong_component2_size_min,
+            :strong_component2_size_σ,
+        ],
+    )
 
     return df
 end
 
 unweighted_graph(graph_weights::Matrix, threshold::Float64)::SimpleGraph = SimpleGraph(graph_weights .> threshold)
 
-# function convert_to_2nd_order_weights(weights1::Matrix{Float16})::Matrix{Float16}
-#     n, _ = size(weights1)
-#     weights2 = fill(Float16(0.0), (n, n))
+function convert_to_2nd_order_weights(weights1::Matrix{Float16}, N::Int, initial_graph_weight::Float64)::Matrix{Float16}
+    weights2 = fill(Float16(0.0), (N, N))
 
-#     @inbounds for x = 1:n
-#         @simd for y = 1:n
-#             if x < y
-#                 weights2[x, y] = weights1[x, y] + weights1[x, :]' * weights1[:, y]
-#                 weights2[y, x] = weights2[x, y]
-#             end
-#         end
-#     end
-
-#     return weights2
-# end
-
-function convert_to_2nd_order_weights(weights1::Matrix{Float16})::Matrix{Float16}
-    n, _ = size(weights1)
-    weights2 = fill(Float16(0.0), (n, n))
-
-    @inbounds for x = 1:n
+    @inbounds for x = 1:N
         x_weights = @views weights1[x, :]'
-        @simd for y = x+1:n
+        @simd for y = (x + 1):N
             weights2[x, y] = weights1[x, y] + x_weights * weights1[:, y]
             weights2[y, x] = weights2[x, y]
         end
     end
+
+    Simulation.normalize_graph_weights!(weights2, N, initial_graph_weight)
 
     return weights2
 end
@@ -121,7 +120,7 @@ mean_C(g::SimpleGraph, N::Int)::Float16 = Float16(mean(local_clustering_coeffici
 
 std_component_size(components::Vector{Int})::Float16 = Float16(length(components) > 1 ? std(components) : 0.0)
 
-function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10)::Nothing
+function log!(output::DataFrame, generation::Int, model::Model, detail::Bool = false, skip::Int = 10)::Nothing
     output[generation, 12:16] = [
         generation,
         model.N,                                       # population
@@ -133,18 +132,21 @@ function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10):
     (generation % skip != 0) && return
 
     # flatten graph_weights
-    weight_vec = [Float64(model.graph_weights[i, j]) for i = 1:model.N for j in 1:model.N if i < j]  # costly
+    weight_vec = [Float64(model.graph_weights[i, j]) for i = 1:(model.N) for j in 1:(model.N) if i < j]  # costly
 
     # 1st order connection
-    weak_connection_g = unweighted_graph(model.graph_weights, 0.25)  # costly
-    medium_connection_g = unweighted_graph(model.graph_weights, 0.50)  # costly
-    strong_connection_g = unweighted_graph(model.graph_weights, 0.75)  # costly
+    weak_connection_g = unweighted_graph(model.graph_weights, WEAK_THRESHOLD)  # costly
+    medium_connection_g = unweighted_graph(model.graph_weights, MEDIUM_THRESHOLD)  # costly
+    strong_connection_g = unweighted_graph(model.graph_weights, STRONG_THRESHOLD)  # costly
 
     # 2nd order connection
-    second_order_weights = convert_to_2nd_order_weights(model.graph_weights)
-    weak_connection2_g = unweighted_graph(second_order_weights, 0.25)  # costly
-    medium_connection2_g = unweighted_graph(second_order_weights, 0.50)  # costly
-    strong_connection2_g = unweighted_graph(second_order_weights, 0.75)  # costly
+    if detail
+        second_order_weights =
+            convert_to_2nd_order_weights(model.graph_weights, model.N, model.param.initial_graph_weight)
+        weak_connection2_g = unweighted_graph(second_order_weights, WEAK_THRESHOLD)  # costly
+        medium_connection2_g = unweighted_graph(second_order_weights, MEDIUM_THRESHOLD)  # costly
+        strong_connection2_g = unweighted_graph(second_order_weights, STRONG_THRESHOLD)  # costly
+    end
 
     # 1st order components
     weak_components = [length(c) for c in connected_components(weak_connection_g)]
@@ -152,9 +154,11 @@ function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10):
     strong_components = [length(c) for c in connected_components(strong_connection_g)]
 
     # 2nd order components
-    weak_components2 = [length(c) for c in connected_components(weak_connection2_g)]
-    medium_components2 = [length(c) for c in connected_components(medium_connection2_g)]
-    strong_components2 = [length(c) for c in connected_components(strong_connection2_g)]
+    if detail
+        weak_components2 = [length(c) for c in connected_components(weak_connection2_g)]
+        medium_components2 = [length(c) for c in connected_components(medium_connection2_g)]
+        strong_components2 = [length(c) for c in connected_components(strong_connection2_g)]
+    end
 
     output[generation, 17:end] = [
         mean(weight_vec),                                 # 17 重みの平均
@@ -169,11 +173,11 @@ function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10):
         maximum(weak_components) / model.N,               # 24 最大コンポーネントサイズ
         minimum(weak_components) / model.N,               # 25 最小コンポーネントサイズ
         std_component_size(weak_components) / model.N,    # 26 コンポーネントサイズの標準偏差
-        length(weak_components2),                         # 27 コンポーネント数
-        mean(weak_components2) / model.N,                 # 28 平均コンポーネントサイズ
-        maximum(weak_components2) / model.N,              # 29 最大コンポーネントサイズ
-        minimum(weak_components2) / model.N,              # 30 最小コンポーネントサイズ
-        std_component_size(weak_components2) / model.N,   # 31 コンポーネントサイズの標準偏差
+        detail ? length(weak_components2) : 0.0,                         # 27 コンポーネント数
+        detail ? mean(weak_components2) / model.N : 0.0,                 # 28 平均コンポーネントサイズ
+        detail ? maximum(weak_components2) / model.N : 0.0,              # 29 最大コンポーネントサイズ
+        detail ? minimum(weak_components2) / model.N : 0.0,              # 30 最小コンポーネントサイズ
+        detail ? std_component_size(weak_components2) / model.N : 0.0,   # 31 コンポーネントサイズの標準偏差
 
         # medium connection
         mean_k(medium_connection_g),                      # 32 平均次数 <k>
@@ -184,11 +188,11 @@ function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10):
         maximum(medium_components) / model.N,             # 37 最大コンポーネントサイズ
         minimum(medium_components) / model.N,             # 38 最小コンポーネントサイズ
         std_component_size(medium_components) / model.N,  # 39 コンポーネントサイズの標準偏差
-        length(medium_components2),                       # 40 コンポーネント数
-        mean(medium_components2) / model.N,               # 41 平均コンポーネントサイズ
-        maximum(medium_components2) / model.N,            # 42 最大コンポーネントサイズ
-        minimum(medium_components2) / model.N,            # 43 最小コンポーネントサイズ
-        std_component_size(medium_components2) / model.N, # 44 コンポーネントサイズの標準偏差
+        detail ? length(medium_components2) : 0.0,                       # 40 コンポーネント数
+        detail ? mean(medium_components2) / model.N : 0.0,               # 41 平均コンポーネントサイズ
+        detail ? maximum(medium_components2) / model.N : 0.0,            # 42 最大コンポーネントサイズ
+        detail ? minimum(medium_components2) / model.N : 0.0,            # 43 最小コンポーネントサイズ
+        detail ? std_component_size(medium_components2) / model.N : 0.0, # 44 コンポーネントサイズの標準偏差
 
         # strong connection
         mean_k(strong_connection_g),                      # 45 平均次数 <k>
@@ -199,11 +203,11 @@ function log!(output::DataFrame, generation::Int, model::Model, skip::Int = 10):
         maximum(strong_components) / model.N,             # 50 最大コンポーネントサイズ
         minimum(strong_components) / model.N,             # 51 最小コンポーネントサイズ
         std_component_size(strong_components) / model.N,  # 52 コンポーネントサイズの標準偏差
-        length(strong_components2),                       # 53 コンポーネント数
-        mean(strong_components2) / model.N,               # 54 平均コンポーネントサイズ
-        maximum(strong_components2) / model.N,            # 55 最大コンポーネントサイズ
-        minimum(strong_components2) / model.N,            # 56 最小コンポーネントサイズ
-        std_component_size(strong_components2) / model.N, # 57 コンポーネントサイズの標準偏差
+        detail ? length(strong_components2) : 0.0,                       # 53 コンポーネント数
+        detail ? mean(strong_components2) / model.N : 0.0,               # 54 平均コンポーネントサイズ
+        detail ? maximum(strong_components2) / model.N : 0.0,            # 55 最大コンポーネントサイズ
+        detail ? minimum(strong_components2) / model.N : 0.0,            # 56 最小コンポーネントサイズ
+        detail ? std_component_size(strong_components2) / model.N : 0.0, # 57 コンポーネントサイズの標準偏差
     ]
 
     return

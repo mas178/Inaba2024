@@ -13,15 +13,15 @@ export Model, Param, Strategy, C, D, interaction!, death_and_birth!
 invert(s::Strategy)::Strategy = (s == C ? D : C)
 
 """
-    ar1_model(β::Float64, σ::Float64, μ::Float64 = 1.0, T::Int = 100)::Vector{Float64}
+    ar1_model(β::Float64, σ::Float64, μ::Float64, T::Int, rng::MersenneTwister)::Vector{Float64}
 
 AR(1) Model to create environmental volatility (`env_severity_vec`).
 """
 function ar1_model(
     β::Float64,        # 自己回帰の係数。|β| < 1 の場合に平均回帰性を持つ。μ = α / (1 - β)
     σ::Float64,        # std of white noise
-    T::Int,            # time steps
     μ::Float64,        # expected average value
+    T::Int,            # time steps
     rng::MersenneTwister,
 )::Vector{Float64}
     α = μ * (1 - β)    # 定数項。μから逆算する。
@@ -30,7 +30,7 @@ function ar1_model(
 
     for t = 1:T
         ϵ = σ * randn(rng)  # white noise
-        x[t+1] = clamp(α + β * x[t] + ϵ, 0.0, 2.0)
+        x[t + 1] = clamp(α + β * x[t] + ϵ, 0.0, 2.0)
     end
 
     return x
@@ -68,7 +68,7 @@ mutable struct Model
             fill(0.0, p.initial_N),
             (fill(1.0, (p.initial_N, p.initial_N)) - Matrix(I, p.initial_N, p.initial_N)) * p.initial_graph_weight,
             Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, p.T), (D, C) => (p.T, p.S), (D, D) => (0.0, 0.0)),
-            ar1_model(p.β, p.σ, round(Int, p.generations / 10), 1.0, p.rng),
+            ar1_model(p.β, p.σ, 1.0, round(Int, p.generations / 10), p.rng),
             p,
         )
     end
@@ -100,8 +100,8 @@ function interaction!(model::Model)::Nothing
     model.payoff_vec .= 0.0
 
     n_interaction = Int(round(model.N * model.param.interaction_freqency))
-    focal_id_vec = sample(model.param.rng, 1:model.N, n_interaction, replace = false)
-    all_ids = collect(1:model.N)
+    focal_id_vec = sample(model.param.rng, 1:(model.N), n_interaction, replace = false)
+    all_ids = collect(1:(model.N))
     temp_weights = Vector{Float16}(undef, model.N - 1)
 
     @inbounds for focal_id in focal_id_vec
@@ -134,31 +134,31 @@ sigmoid_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 / (1.0 + exp(-δ * 
 
 function pick_deaths(model::Model, n::Int)::Vector{Int}
     neg_fitness_vec = sigmoid_fitness.(-model.payoff_vec, model.param.δ)
-    death_id_vec = sample(model.param.rng, 1:model.N, Weights(neg_fitness_vec), n, replace = false)
+    death_id_vec = sample(model.param.rng, 1:(model.N), Weights(neg_fitness_vec), n, replace = false)
 
     return sort(death_id_vec)
 end
 
 function pick_parents(model::Model, n::Int)::Vector{Int}
     fitness_vec = sigmoid_fitness.(model.payoff_vec, model.param.δ)
-    parent_id_vec = sample(model.param.rng, 1:model.N, Weights(fitness_vec), n, replace = false)
+    parent_id_vec = sample(model.param.rng, 1:(model.N), Weights(fitness_vec), n, replace = false)
 
     return sort(parent_id_vec)
 end
 
-function normalize_graph_weights!(model::Model)::Nothing
-    initial_graph_weight_sum = model.N * (model.N - 1) * model.param.initial_graph_weight
+function normalize_graph_weights!(graph_weights::Matrix{Float16}, N::Int, initial_graph_weight::Float64)::Nothing
+    initial_graph_weight_sum = N * (N - 1) * initial_graph_weight
 
-    # graph_weight_sum = sum(Float64.(model.graph_weights))
+    # factor = sum(Float64.(graph_weights))
     factor = 0.0
-    @inbounds @simd for weight in model.graph_weights
+    @inbounds @simd for weight in graph_weights
         factor += Float64(weight)
     end
 
-    # model.graph_weights ./= (graph_weight_sum / initial_graph_weight_sum)
+    # graph_weights ./= (factor / initial_graph_weight_sum)
     factor = Float16(initial_graph_weight_sum / factor)
-    @inbounds @simd for i in eachindex(model.graph_weights)
-        model.graph_weights[i] *= factor
+    @inbounds @simd for i in eachindex(graph_weights)
+        graph_weights[i] *= factor
     end
 
     return
@@ -187,15 +187,15 @@ function death_and_birth!(model::Model, generation::Int)::Tuple{Vector{Int},Vect
     # death
     if model.N - n_deaths > model.param.initial_N / 2
         death_id_vec = pick_deaths(model, n_deaths)
-        survived_index = deleteat!(collect(1:model.N), death_id_vec)
+        survived_index = deleteat!(collect(1:(model.N)), death_id_vec)
         deleteat!(model.strategy_vec, death_id_vec)
         deleteat!(model.payoff_vec, death_id_vec)
         model.N -= n_deaths
 
         # model.graph_weights = model.graph_weights[survived_index, survived_index]
         _new_weights = fill(Float16(0.0), model.N, model.N)
-        @inbounds for x = 1:model.N
-            @simd for y = 1:model.N
+        @inbounds for x = 1:(model.N)
+            @simd for y = 1:(model.N)
                 _new_weights[x, y] = model.graph_weights[survived_index[x], survived_index[y]]
             end
         end
@@ -225,21 +225,21 @@ function death_and_birth!(model::Model, generation::Int)::Tuple{Vector{Int},Vect
         # model.graph_weights[:, (model.N-n_births+1):end] = model.graph_weights[:, parent_id_vec]
         model.N += n_births
         _new_weights = fill(Float16(0.0), (model.N, model.N))
-        @inbounds for x = 1:model.N-n_births
-            @simd for y = 1:model.N-n_births
+        @inbounds for x = 1:(model.N - n_births)
+            @simd for y = 1:(model.N - n_births)
                 _new_weights[x, y] = model.graph_weights[x, y]
             end
         end
         @inbounds @simd for i = 1:n_births
-            _new_weights[model.N-n_births+i, :] = _new_weights[parent_id_vec[i], :]
-            _new_weights[:, model.N-n_births+i] = _new_weights[:, parent_id_vec[i]]
-            _new_weights[parent_id_vec[i], model.N-n_births+i] = 1.0
-            _new_weights[model.N-n_births+i, parent_id_vec[i]] = 1.0
-            _new_weights[model.N-n_births+i, model.N-n_births+i] = 0.0
+            _new_weights[model.N - n_births + i, :] = _new_weights[parent_id_vec[i], :]
+            _new_weights[:, model.N - n_births + i] = _new_weights[:, parent_id_vec[i]]
+            _new_weights[parent_id_vec[i], model.N - n_births + i] = 1.0
+            _new_weights[model.N - n_births + i, parent_id_vec[i]] = 1.0
+            _new_weights[model.N - n_births + i, model.N - n_births + i] = 0.0
         end
         model.graph_weights = _new_weights
 
-        normalize_graph_weights!(model)
+        normalize_graph_weights!(model.graph_weights, model.N, model.param.initial_graph_weight)
     end
 
     return death_id_vec, parent_id_vec

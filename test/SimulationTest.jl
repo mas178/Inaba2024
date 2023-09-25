@@ -20,14 +20,14 @@ end
     T = 100
     rng = MersenneTwister(1)
     for (β, σ) in Iterators.product(0.1:0.1:0.9, 0.1:0.1:0.9)
-        @test mean([mean(Simulation.ar1_model(β, σ, T, 1.0, rng)) for _ = 1:1000]) ≈ 1.0 atol = 0.1
+        @test mean([mean(Simulation.ar1_model(β, σ, 1.0, T, rng)) for _ = 1:1000]) ≈ 1.0 atol = 0.1
     end
     @test mean([
-        std(Simulation.ar1_model(0.2, 0.1, T, 1.0, rng)) > std(Simulation.ar1_model(0.1, 0.1, T, 1.0, rng)) for
+        std(Simulation.ar1_model(0.2, 0.1, 1.0, T, rng)) > std(Simulation.ar1_model(0.1, 0.1, 1.0, T, rng)) for
         _ = 1:1000
     ]) > 0.5
-    @test std(Simulation.ar1_model(0.1, 0.2, T, 1.0, rng)) > std(Simulation.ar1_model(0.1, 0.1, T, 1.0, rng))
-    @test std(Simulation.ar1_model(0.2, 0.2, T, 1.0, rng)) > std(Simulation.ar1_model(0.1, 0.1, T, 1.0, rng))
+    @test std(Simulation.ar1_model(0.1, 0.2, 1.0, T, rng)) > std(Simulation.ar1_model(0.1, 0.1, 1.0, T, rng))
+    @test std(Simulation.ar1_model(0.2, 0.2, 1.0, T, rng)) > std(Simulation.ar1_model(0.1, 0.1, 1.0, T, rng))
 end
 
 @testset "Model" begin
@@ -282,7 +282,7 @@ end
     model.graph_weights[1, 2:end] = fill(1.0, 9)
 
     # execute
-    Simulation.normalize_graph_weights!(model)
+    Simulation.normalize_graph_weights!(model.graph_weights, model.N, model.param.initial_graph_weight)
 
     # after
     @test diag(model.graph_weights) == fill(0.0, 10)
@@ -296,7 +296,7 @@ end
     model = Model(Param())
     expected_death_rate = model.env_severity_vec .* model.param.birth_rate
 
-    for generation = 1:model.param.generations
+    for generation = 1:(model.param.generations)
         actual_death_rate = Simulation.get_death_rate(model, generation)
 
         if generation % 10 == 1
@@ -308,7 +308,7 @@ end
 end
 
 function make_symmetric_matrix(N::Int)::Matrix{Float16}
-    symmetric_matrix = repeat(collect(0.0:1/(N-1):1.0), 1, N)
+    symmetric_matrix = repeat(collect(0.0:(1 / (N - 1)):1.0), 1, N)
     symmetric_matrix -= Diagonal(symmetric_matrix)
     symmetric_matrix = (symmetric_matrix + symmetric_matrix') / 2
     return Float16.(symmetric_matrix)

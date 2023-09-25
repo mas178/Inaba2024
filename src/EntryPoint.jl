@@ -4,14 +4,14 @@ using DataFrames: DataFrame
 
 include("./Output.jl")
 using .Output: Output
-using .Output.Simulation: Model, C, D, interaction!, death_and_birth!
+using .Output.Simulation: Param, Model, C, D, interaction!, death_and_birth!
 
 function run(param::Output.Simulation.Param)::DataFrame
     model = Model(param)
     model.strategy_vec = rand(model.param.rng, [C, D], model.param.initial_N)
     output_df = Output.make_output_df(param)
 
-    for generation = 1:model.param.generations
+    for generation = 1:(model.param.generations)
         interaction!(model)
         death_and_birth!(model, generation)
         Output.log!(output_df, generation, model)
@@ -59,17 +59,17 @@ end
 
 end  # end of module
 
-# using Pkg
-# Pkg.activate("../Inaba2024")
-# using CSV: write
-# using Dates
+if abspath(PROGRAM_FILE) == @__FILE__
+    using CSV: write
+    using Dates
+    using .EntryPoint: ParamOptions, to_vector, run
 
-# const PARAM_OPTIONS = to_vector(ParamOptions())
-# const DIR_NAME = "output/$(Dates.format(now(), "yyyymmdd_HHMMSS"))"
+    const PARAM_OPTIONS = to_vector(ParamOptions())
+    const DIR_NAME = "output/$(Dates.format(now(), "yyyymmdd_HHMMSS"))"
 
-# mkdir(DIR_NAME)
+    mkdir(DIR_NAME)
 
-# Threads.@threads for i in eachindex(PARAM_OPTIONS)
-#     df, _ = run(PARAM_OPTIONS[i])
-#     write("$(DIR_NAME)/$(i).csv", df)
-# end
+    Threads.@threads for i in eachindex(PARAM_OPTIONS)
+        write("$(DIR_NAME)/$(i).csv", run(PARAM_OPTIONS[i]))
+    end
+end

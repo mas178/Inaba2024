@@ -1,6 +1,12 @@
 JULIA_CMD = julia --project=../Inaba2024
 
-.PHONY: test test_simulation test_output test_entry_point format profiling
+.PHONY: all test test_simulation test_output test_entry_point format profiling update
+
+all: update format test profiling
+
+run:
+	@echo "\nRunning src/EntryPoint.jl\n"
+	nohup $(JULIA_CMD) --threads 8 src/EntryPoint.jl > log/run_all.log &
 
 test: test_simulation test_output test_entry_point
 
@@ -13,13 +19,15 @@ test_output:
 	$(JULIA_CMD) test/OutputTest.jl
 
 test_entry_point:
-	@echo "\nRunning test/EntryPoint.jl\n"
+	@echo "\nRunning test/EntryPointTest.jl\n"
 	$(JULIA_CMD) test/EntryPointTest.jl
 
 format:
-	$(JULIA_CMD) -e 'using JuliaFormatter; format("src/Simulation.jl")'
-	$(JULIA_CMD) -e 'using JuliaFormatter; format("src/Output.jl")'
+	$(JULIA_CMD) -e 'using JuliaFormatter; format("src/")'
 	$(JULIA_CMD) -e 'using JuliaFormatter; format("test/")'
 
 profiling:
 	$(JULIA_CMD) -i test/PerformanceProfiling.jl
+
+update:
+	$(JULIA_CMD) -e "using Pkg; Pkg.update()"

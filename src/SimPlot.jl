@@ -16,6 +16,38 @@ function csv_to_df(dir_name_vec::Vector{String})::Vector{DataFrame}
     return [CSV.File(csv_file_name) |> DataFrame for csv_file_name in csv_file_names]
 end
 
+function plot_network_attributes(df::DataFrame, prefix::String, skip::Int)::Plot
+    df = df[df.generation .% skip .== 0, :]
+    p = plot(xl = "Generation", title = "Network Attributes ($(prefix))")
+    plot!(df.generation, df.weight_μ, ribbon = df.weight_σ, fillalpha = 0.5, label = "Weight")
+    plot!(df.generation, df[:, Symbol("$(prefix)_L")], label = "L")
+    plot!(df.generation, df[:, Symbol("$(prefix)_C")], label = "C")
+    plot!(twinx(), df.generation, df[:, Symbol("$(prefix)_k")], label = "<k>", line = :dash)
+
+    return p
+end
+
+function plot_component_attributes(df::DataFrame, prefix::String, weight_order::Int, skip::Int)::Plot
+    df = df[df.generation .% skip .== 0, :]
+    p = plot(xl = "Generation", title = "Component Attributes ($(prefix))")
+    component_size_μ = Symbol("$(prefix)_component$(weight_order)_size_μ")
+    component_size_min = Symbol("$(prefix)_component$(weight_order)_size_min")
+    component_size_max = Symbol("$(prefix)_component$(weight_order)_size_max")
+    component_size_σ = Symbol("$(prefix)_component$(weight_order)_size_σ")
+    component_count = Symbol("$(prefix)_component$(weight_order)_count")
+    plot!(
+        df.generation,
+        df[:, component_size_μ],
+        ribbon = (df[:, component_size_μ] - df[:, component_size_min], df[:, component_size_σ]),
+        fillalpha = 0.5,
+        label = "Size",
+    )
+    plot!(df.generation, df[:, component_size_max], label = "Size (Max)")
+    plot!(twinx(), df.generation, df[:, component_count], label = "Count", line = :dash, yscale = :log10)
+
+    return p
+end
+
 function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
     p1 = plot(xl = "Generation", title = "Population")
     plot!(df.generation, df.birth_rate, label = "Birth Rate")
@@ -26,54 +58,20 @@ function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
     plot!(df.cooperation_rate, label = "Cooperation Rate")
     plot!(df.payoff_μ, label = "Payoff (μ)")
 
-    df = df[df.generation.%skip.==0, :]
-
-    p3 = plot(xl = "Generation", title = "Network Attributes (Weak)")
-    plot!(df.generation, df.weight_μ, ribbon = df.weight_σ, fillalpha = 0.5, label = "Weight")
-    plot!(df.generation, df.L, label = "L")
-    plot!(df.generation, df.C, label = "C")
-    plot!(twinx(), df.generation, df.k, label = "<k>", line = :dash)
-
-    p4 = plot(xl = "Generation", title = "Network Attributes (Strong)")
-    plot!(df.generation, df.weight_μ, ribbon = df.weight_σ, fillalpha = 0.5, label = "Weight")
-    plot!(df.generation, df.strong_L, label = "L")
-    plot!(df.generation, df.strong_C, label = "C")
-    plot!(twinx(), df.generation, df.strong_k, label = "<k>", line = :dash)
-
-    p5 = plot(xl = "Generation", title = "Component Attributes (Weak)")
-    plot!(
-        df.generation,
-        df.component_size_μ,
-        ribbon = (df.component_size_μ - df.component_size_min, df.component_size_σ),
-        fillalpha = 0.5,
-        label = "Size",
-    )
-    plot!(df.generation, df.component_size_max, label = "Size (Max)")
-    plot!(twinx(), df.generation, df.component_count, label = "Count", line = :dash, yscale = :log10)
-
-    p6 = plot(xl = "Generation", title = "Component Attributes (Strong)")
-    plot!(
-        df.generation,
-        df.strong_component_size_μ,
-        ribbon = (df.strong_component_size_μ - df.strong_component_size_min, df.strong_component_size_σ),
-        fillalpha = 0.5,
-        label = "Size",
-    )
-    plot!(df.generation, df.strong_component_size_max, label = "Size (Max)")
-    plot!(twinx(), df.generation, df.strong_component_count, label = "Count", line = :dash, yscale = :log10)
-
     params1 = join(["$(k) = $(v)" for (k, v) in pairs(df[1, [2, 3, 10, 11]])], ", ")
     params2 = join(["$(k) = $(v)" for (k, v) in pairs(df[1, 4:9])], ", ")
 
     return plot(
         p1,
         p2,
-        p3,
-        p5,
-        p4,
-        p6,
-        layout = (3, 2),
-        size = (800, 1200),
+        plot_network_attributes(df, "weak", skip),
+        plot_component_attributes(df, "weak", 1, skip),
+        plot_network_attributes(df, "medium", skip),
+        plot_component_attributes(df, "medium", 1, skip),
+        plot_network_attributes(df, "strong", skip),
+        plot_component_attributes(df, "strong", 1, skip),
+        layout = (4, 2),
+        size = (800, 1600),
         bottom_margin = 6 * PlotMeasures.mm,
         suptitle = "$(params1)\n$(params2)",
         plot_titlefontsize = 10,
@@ -109,9 +107,9 @@ function get_value(
     y::Float64,
     x_symbol::Symbol,
     y_symbol::Symbol,
-    value_symbol::Symbol
+    value_symbol::Symbol,
 )::Union{Float64,Missing}
-    values = df[df[:, x_symbol].==x.&&df[:, y_symbol].==y, value_symbol]
+    values = df[df[:, x_symbol] .== x .&& df[:, y_symbol] .== y, value_symbol]
     if length(values) > 0
         mean(values)
     else
