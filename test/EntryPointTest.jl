@@ -43,11 +43,12 @@ end
         μ_vec = [0.01],
         β_σ_vec = [(0.1, 0.2), (0.3, 0.4), (0.5, 0.6)],
         generations_vec = [10, 20],
+        trials = 3,
     )
 
     params = to_vector(params)
     @test typeof(params) == Vector{Param}
-    @test length(params) == 2592 == 3 * 2 * 3 * 2 * 2 * 3 * 2 * 1 * 3 * 2
+    @test length(params) == 7776 == 3 * 2 * 3 * 2 * 2 * 3 * 2 * 1 * 3 * 2 * 3
 
     @test params[1].initial_N == 100
     @test params[2].initial_N == 200
@@ -74,4 +75,22 @@ end
     @test params[2592].β == 0.5
     @test params[2592].σ == 0.6
     @test params[2592].generations == 20
+
+    for i = 1:2592
+        a = params[i]
+        b = params[i + 2592]
+        c = params[i + 2592 * 2]
+
+        @test a.initial_N == b.initial_N == c.initial_N
+        @test a.T == b.T == c.T
+        @test a.S == b.S == c.S
+        @test a.initial_graph_weight == b.initial_graph_weight == c.initial_graph_weight
+        @test a.interaction_freqency == b.interaction_freqency == c.interaction_freqency
+        @test a.relationship_volatility == b.relationship_volatility == c.relationship_volatility
+        @test a.δ == b.δ == c.δ
+        @test a.μ == b.μ == c.μ
+        @test a.β == b.β == c.β
+        @test a.σ == b.σ == c.σ
+        @test a.generations == b.generations == c.generations
+    end
 end

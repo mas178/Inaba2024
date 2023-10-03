@@ -59,6 +59,7 @@ end
     μ_vec = [0.01]
     β_σ_vec = [(0.0, 0.0)]
     generations_vec = [2_000]
+    trials = 10
 end
 
 function to_vector(params::ParamOptions)::Vector{Param}
@@ -82,7 +83,7 @@ function to_vector(params::ParamOptions)::Vector{Param}
         β_σ in params.β_σ_vec, generations in params.generations_vec
     ]
 
-    return reshape(result, :)
+    return repeat(reshape(result, :), params.trials)
 end
 
 end  # end of module
@@ -96,13 +97,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
     const DIR_NAME = "output/$(Dates.format(now(), "yyyymmdd_HHMMSS"))"
     const DETAIL = false
     # const DETAIL = true
-    const TRIALS = 10
 
     mkdir(DIR_NAME)
 
-    for trial = 1:TRIALS
-        Threads.@threads for i in eachindex(PARAM_OPTIONS)
-            write("$(DIR_NAME)/$(trial)_$(i).csv", run(PARAM_OPTIONS[i], DETAIL))
-        end
+    Threads.@threads for i in eachindex(PARAM_OPTIONS)
+        write("$(DIR_NAME)/$(trial)_$(i).csv", run(PARAM_OPTIONS[i], DETAIL))
     end
 end
