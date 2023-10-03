@@ -30,4 +30,5 @@ profiling:
 	$(JULIA_CMD) -i test/PerformanceProfiling.jl
 
 update:
+	julia -e "using Pkg; Pkg.update()"
 	$(JULIA_CMD) -e "using Pkg; Pkg.update()"

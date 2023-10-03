@@ -1,7 +1,7 @@
 module SimPlot
 
 using CSV
-using DataFrames: DataFrame, SubDataFrame, nrow
+using DataFrames: DataFrame, AbstractDataFrame, nrow
 using Glob: glob
 using Plots: Plot, plot!, plot, heatmap, twinx, PlotMeasures
 using StatsBase: mean
@@ -10,7 +10,8 @@ function csv_to_df(dir_name_vec::Vector{String})::Vector{DataFrame}
     csv_file_names = []
 
     for dir_name in dir_name_vec
-        append!(csv_file_names, glob("*.csv", "../output/$(dir_name)"))
+        append!(csv_file_names, glob("../output/$(dir_name)/*.csv"))
+        append!(csv_file_names, glob("../output/$(dir_name)/**/*.csv"))
     end
 
     return [CSV.File(csv_file_name) |> DataFrame for csv_file_name in csv_file_names]
@@ -52,7 +53,7 @@ function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
     p1 = plot(xl = "Generation", title = "Population")
     plot!(df.generation, df.birth_rate, label = "Birth Rate")
     plot!(df.generation, df.death_rate, label = "Death Rate")
-    plot!(twinx(), df.generation, df.N, label = "Population", line = :dash)
+    # plot!(twinx(), df.generation, df.N, label = "Population", line = :dash)
 
     p2 = plot(xl = "Generation", title = "Cooperation")
     plot!(df.cooperation_rate, label = "Cooperation Rate")
@@ -63,15 +64,19 @@ function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
 
     return plot(
         p1,
+        plot(df.generation, df.N, label = false),
         p2,
         plot_network_attributes(df, "weak", skip),
         plot_component_attributes(df, "weak", 1, skip),
+        plot_component_attributes(df, "weak", 2, skip),
         plot_network_attributes(df, "medium", skip),
         plot_component_attributes(df, "medium", 1, skip),
+        plot_component_attributes(df, "medium", 2, skip),
         plot_network_attributes(df, "strong", skip),
         plot_component_attributes(df, "strong", 1, skip),
-        layout = (4, 2),
-        size = (800, 1600),
+        plot_component_attributes(df, "strong", 2, skip),
+        layout = (4, 3),
+        size = (1200, 1600),
         bottom_margin = 6 * PlotMeasures.mm,
         suptitle = "$(params1)\n$(params2)",
         plot_titlefontsize = 10,
@@ -83,14 +88,40 @@ function calc_mean(df::DataFrame)::DataFrame
 
     generations = nrow(df)
     _df = DataFrame(df[1, 1:11])
+    _df.generations .= generations
     start = round(Int, generations * 0.1)
+    _df.N .= mean(df.N[start:end])
     _df.cooperation_rate .= mean(df.cooperation_rate[start:end])
-    _df.component_count .= mean(df.component_count[start:end])
-    _df.component_size_μ .= mean(df.component_size_μ[start:end])
-    _df.component_size_max .= mean(df.component_size_max[start:end])
-    _df.strong_component_count .= mean(df.strong_component_count[start:end])
-    _df.strong_component_size_μ .= mean(df.strong_component_size_μ[start:end])
-    _df.strong_component_size_max .= mean(df.strong_component_size_max[start:end])
+
+    if :component_count ∈ names(_df)
+        _df.component_count .= mean(df.component_count[start:end])
+        _df.component_size_μ .= mean(df.component_size_μ[start:end])
+        _df.component_size_max .= mean(df.component_size_max[start:end])
+        _df.strong_component_count .= mean(df.strong_component_count[start:end])
+        _df.strong_component_size_μ .= mean(df.strong_component_size_μ[start:end])
+        _df.strong_component_size_max .= mean(df.strong_component_size_max[start:end])
+    else
+        _df.weak_component1_count .= mean(df.weak_component1_count[start:end])
+        _df.weak_component1_size_μ .= mean(df.weak_component1_size_μ[start:end])
+        _df.weak_component1_size_max .= mean(df.weak_component1_size_max[start:end])
+        _df.weak_component2_count .= mean(df.weak_component2_count[start:end])
+        _df.weak_component2_size_μ .= mean(df.weak_component2_size_μ[start:end])
+        _df.weak_component2_size_max .= mean(df.weak_component2_size_max[start:end])
+
+        _df.medium_component1_count .= mean(df.medium_component1_count[start:end])
+        _df.medium_component1_size_μ .= mean(df.medium_component1_size_μ[start:end])
+        _df.medium_component1_size_max .= mean(df.medium_component1_size_max[start:end])
+        _df.medium_component2_count .= mean(df.medium_component2_count[start:end])
+        _df.medium_component2_size_μ .= mean(df.medium_component2_size_μ[start:end])
+        _df.medium_component2_size_max .= mean(df.medium_component2_size_max[start:end])
+
+        _df.strong_component1_count .= mean(df.strong_component1_count[start:end])
+        _df.strong_component1_size_μ .= mean(df.strong_component1_size_μ[start:end])
+        _df.strong_component1_size_max .= mean(df.strong_component1_size_max[start:end])
+        _df.strong_component2_count .= mean(df.strong_component2_count[start:end])
+        _df.strong_component2_size_μ .= mean(df.strong_component2_size_μ[start:end])
+        _df.strong_component2_size_max .= mean(df.strong_component2_size_max[start:end])
+    end
 
     return _df
 end
@@ -102,7 +133,7 @@ function make_mean_df(df_vec::Vector{DataFrame})::DataFrame
 end
 
 function get_value(
-    df::DataFrame,
+    df::AbstractDataFrame,
     x::Float64,
     y::Float64,
     x_symbol::Symbol,
@@ -117,7 +148,7 @@ function get_value(
     end
 end
 
-function plot_cooperation_heatmap(df::SubDataFrame)::Plot
+function plot_cooperation_heatmap(df::AbstractDataFrame)::Plot
     # using Makie
     # using WGLMakie
     # fig = Figure()

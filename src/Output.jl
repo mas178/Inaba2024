@@ -124,9 +124,9 @@ function log!(output::DataFrame, generation::Int, model::Model, detail::Bool = f
     output[generation, 12:16] = [
         generation,
         model.N,                                       # population
-        mean(model.strategy_vec .== C),                # 協力率
-        mean(model.payoff_vec),                        # 平均ペイオフ
-        Simulation.get_death_rate(model, generation),  # 死亡率
+        mean(model.strategy_vec .== C),                # cooperation rate
+        mean(model.payoff_vec),                        # average payoff
+        Simulation.get_death_rate(model, generation),  # death rate
     ]
 
     (generation % skip != 0) && return
