@@ -6,31 +6,37 @@ using LinearAlgebra
 using Random: MersenneTwister
 using StatsBase: mean, std, sample, Weights
 
-export Model, Param, Strategy, C, D, interaction!, death_and_birth!
+export Model, ModelPopulation, ModelPayoff, Param, C, D, interaction!, death_and_birth!
 
 @enum Strategy C D
 
 invert(s::Strategy)::Strategy = (s == C ? D : C)
 
 """
-    ar1_model(β::Float64, σ::Float64, μ::Float64, T::Int, rng::MersenneTwister)::Vector{Float64}
+    ar1(β::Float64, σ::Float64, μ::Float64, T::Int, rng::MersenneTwister)::Vector{Float64}
 
-AR(1) Model to create environmental volatility (`env_severity_vec`).
+AR(1) Model to create environmental volatility.
 """
-function ar1_model(
+function ar1(
     β::Float64,        # 自己回帰の係数。|β| < 1 の場合に平均回帰性を持つ。μ = α / (1 - β)
-    σ::Float64,        # std of white noise
+    sigma::Float64,        # std of white noise
     μ::Float64,        # expected average value
     T::Int,            # time steps
     rng::MersenneTwister,
 )::Vector{Float64}
-    α = μ * (1 - β)    # 定数項。μから逆算する。
+    @assert 0 < μ < 2
+
+    variation = min(2.0 - μ, μ)
+    ceiling = μ + variation
+    floor = μ - variation
+    alpha = μ * (1 - β)    # 定数項。μから逆算する。
+
     x = Vector{Float64}(undef, T + 1)
     x[1] = μ
 
     for t = 1:T
-        ϵ = σ * randn(rng)  # white noise
-        x[t + 1] = clamp(α + β * x[t] + ϵ, 0.0, 2.0)
+        ϵ = sigma * randn(rng)  # white noise
+        x[t + 1] = clamp(alpha + β * x[t] + ϵ, floor, ceiling)
     end
 
     return x
@@ -43,7 +49,7 @@ end
     initial_graph_weight::Float64 = 0.5
     interaction_freqency::Float64 = 1.0
     relationship_volatility::Float64 = 0.1
-    birth_rate::Float64 = 0.1
+    reproduction_rate::Float64 = 0.1
     δ::Float64 = 0.01                        # strength of selection
     μ::Float64 = 0.0                         # mutation rate
     β::Float64 = 0.1                         # environmental volatility (自己回帰の係数)
@@ -57,8 +63,9 @@ mutable struct Model
     strategy_vec::Vector{Strategy}     # agents' strategy
     payoff_vec::Vector{Float64}        # agents' payoff
     graph_weights::Matrix{Float16}     # agents' relationship
-    payoff_table::Dict{Tuple{Strategy,Strategy},Tuple{Float64,Float64}}
-    env_severity_vec::Vector{Float64}  # deathe rate = birth rate * env_severity_vec
+    payoff_table::Union{Dict{Tuple{Strategy,Strategy},Tuple{Float64,Float64}},Nothing}
+    payoff_table_vec::Union{Vector{Dict{Tuple{Strategy,Strategy},Tuple{Float64,Float64}}},Nothing}
+    death_rate_vec::Union{Vector{Float64},Nothing}
     param::Param
 
     function Model(p::Param)
@@ -67,11 +74,45 @@ mutable struct Model
             fill(D, p.initial_N),
             fill(0.0, p.initial_N),
             (fill(1.0, (p.initial_N, p.initial_N)) - Matrix(I, p.initial_N, p.initial_N)) * p.initial_graph_weight,
-            Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, p.T), (D, C) => (p.T, p.S), (D, D) => (0.0, 0.0)),
-            ar1_model(p.β, p.σ, 1.0, round(Int, p.generations / 10), p.rng),
+            nothing,
+            nothing,
+            nothing,
             p,
         )
     end
+end
+
+function ModelPopulation(p::Param)::Model
+    model = Model(p)
+    model.payoff_table = Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, p.T), (D, C) => (p.T, p.S), (D, D) => (0.0, 0.0))
+
+    env_severity_vec = ar1(p.β, p.σ, 1.0, round(Int, p.generations / 10), p.rng)
+    death_rate_vec = Vector{Float64}(undef, p.generations)
+
+    for g = 1:(p.generations)
+        env_severity = env_severity_vec[ceil(Int, g / 10)]
+        death_rate_vec[g] = env_severity * model.param.reproduction_rate
+    end
+
+    model.death_rate_vec = death_rate_vec
+
+    return model
+end
+
+function ModelPayoff(p::Param)::Model
+    model = Model(p)
+
+    T_vec = ar1(p.β, p.σ, p.T, round(Int, p.generations / 10), p.rng)
+    payoff_table_vec = Vector{Dict{Tuple{Strategy,Strategy},Tuple{Float64,Float64}}}(undef, p.generations)
+
+    for g = 1:(p.generations)
+        T = T_vec[ceil(Int, g / 10)]
+        payoff_table_vec[g] = Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, T), (D, C) => (T, p.S), (D, D) => (0.0, 0.0))
+    end
+
+    model.payoff_table_vec = payoff_table_vec
+
+    return model
 end
 
 """
@@ -95,7 +136,7 @@ end
     - If C vs. C, the weight is increased by v (0.0 < v < 1.0).
     - Otherwise, the weight is decreased by v.
 """
-function interaction!(model::Model)::Nothing
+function interaction!(model::Model, generation::Int = -1)::Nothing
     # Reset payoff
     model.payoff_vec .= 0.0
 
@@ -103,6 +144,7 @@ function interaction!(model::Model)::Nothing
     focal_id_vec = sample(model.param.rng, 1:(model.N), n_interaction, replace = false)
     all_ids = collect(1:(model.N))
     temp_weights = Vector{Float16}(undef, model.N - 1)
+    update_weights = fill(Float16(1.0), (model.N, model.N))
 
     @inbounds for focal_id in focal_id_vec
         # Pick an opponent
@@ -113,19 +155,21 @@ function interaction!(model::Model)::Nothing
         strategy_pair = (model.strategy_vec[focal_id], model.strategy_vec[opponent_id])
 
         # Update payoff
-        focal_payoff, opponent_payoff = model.payoff_table[strategy_pair]
+        focal_payoff, opponent_payoff =
+            model.payoff_table_vec === nothing ? model.payoff_table[strategy_pair] :
+            model.payoff_table_vec[generation][strategy_pair]
         model.payoff_vec[focal_id] += focal_payoff
         model.payoff_vec[opponent_id] += opponent_payoff
 
-        # Update relationship
-        new_weight = if strategy_pair == (C, C)
-            min((1.0 + model.param.relationship_volatility) * model.graph_weights[focal_id, opponent_id], 1.0)
-        else
-            (1.0 - model.param.relationship_volatility) * model.graph_weights[focal_id, opponent_id]
-        end
-        model.graph_weights[focal_id, opponent_id] = new_weight
-        model.graph_weights[opponent_id, focal_id] = new_weight
+        # for updating relationships
+        increment = model.param.relationship_volatility * (strategy_pair == (C, C) ? 1 : -1)
+        update_weights[focal_id, opponent_id] = update_weights[opponent_id, focal_id] *= (1.0 + increment)
     end
+
+    # Update relationships
+    model.graph_weights = min.(model.graph_weights .* update_weights, 1.0)
+
+    return
 end
 
 classic_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 - δ + δ * payoff
@@ -164,9 +208,6 @@ function normalize_graph_weights!(graph_weights::Matrix{Float16}, N::Int, initia
     return
 end
 
-get_death_rate(model::Model, generation::Int)::Float64 =
-    model.env_severity_vec[ceil(Int, generation / 10)] * model.param.birth_rate
-
 """
     death_and_reproduction!(model::Model)::Tuple{Vector{Int},Vector{Int}}
 
@@ -176,10 +217,11 @@ get_death_rate(model::Model, generation::Int)::Float64 =
 - Child copies the parent's relationship.
 - Strategy is mutated based on mutation rate.
 """
-function death_and_birth!(model::Model, generation::Int)::Tuple{Vector{Int},Vector{Int}}
+function death_and_birth!(model::Model, generation::Int = -1)::Tuple{Vector{Int},Vector{Int}}
     # number of deaths and births (should be calculated before model.N changed).
-    n_deaths = round(Int, model.N * get_death_rate(model, generation))
-    n_births = round(Int, model.N * model.param.birth_rate)
+    death_rate = model.death_rate_vec === nothing ? model.param.reproduction_rate : model.death_rate_vec[generation]
+    n_deaths = round(Int, model.N * death_rate)
+    n_births = round(Int, model.N * model.param.reproduction_rate)
 
     death_id_vec = []
     parent_id_vec = []

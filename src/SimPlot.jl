@@ -1,7 +1,7 @@
 module SimPlot
 
 using CSV
-using DataFrames: DataFrame, AbstractDataFrame, nrow
+using DataFrames: DataFrame, AbstractDataFrame, nrow, combine, groupby
 using Glob: glob
 using Plots: Plot, plot!, plot, heatmap, twinx, PlotMeasures
 using StatsBase: mean
@@ -17,6 +17,7 @@ function csv_to_df(dir_name_vec::Vector{String})::Vector{DataFrame}
     return [CSV.File(csv_file_name) |> DataFrame for csv_file_name in csv_file_names]
 end
 
+#==
 function plot_network_attributes(df::DataFrame, prefix::String, skip::Int)::Plot
     df = df[df.generation .% skip .== 0, :]
     p = plot(xl = "Generation", title = "Network Attributes ($(prefix))")
@@ -24,6 +25,16 @@ function plot_network_attributes(df::DataFrame, prefix::String, skip::Int)::Plot
     plot!(df.generation, df[:, Symbol("$(prefix)_L")], label = "L")
     plot!(df.generation, df[:, Symbol("$(prefix)_C")], label = "C")
     plot!(twinx(), df.generation, df[:, Symbol("$(prefix)_k")], label = "<k>", line = :dash)
+
+    return p
+end
+==#
+
+function plot_network_attributes(df::DataFrame, prefix::String, skip::Int)::Plot
+    df = df[df.generation .% skip .== 0, :]
+    p = plot(xl = "Generation", xticks = 0:50:maximum(df.generation), title = "Network Attributes ($(prefix))")
+    plot!(df.generation, df[:, Symbol("$(prefix)_C1")], label = "C(1)")
+    plot!(df.generation, df[:, Symbol("$(prefix)_C2")], label = "C(2)")
 
     return p
 end
@@ -83,13 +94,25 @@ function plot_output_df(df::DataFrame, skip::Int = 10)::Plot
     )
 end
 
+function calc_mean(df::DataFrame, key_columns::Vector{String}, value_columns::Vector{String})::DataFrame
+    df = df[(df.generation .> 0) .&& (df.generation .% 10 .== 0), :]
+    start = round(Int, nrow(df) * 0.5 + 1)
+    df = df[start:end, :]
+
+    transformations = [col => mean => col for col in value_columns]
+    df = combine(groupby(df, key_columns), transformations...)
+
+    return df
+end
+
+# ToDo: refactoring, use combine and groupby
 function calc_mean(df::DataFrame)::DataFrame
     df = df[df.generation .% 10 .== 0, :]
 
     generations = nrow(df)
     _df = DataFrame(df[1, 1:11])
     _df.generations .= generations
-    start = round(Int, generations * 0.1)
+    start = round(Int, generations * 0.5 + 1)
     _df.N .= mean(df.N[start:end])
     _df.cooperation_rate .= mean(df.cooperation_rate[start:end])
 
@@ -124,6 +147,12 @@ function calc_mean(df::DataFrame)::DataFrame
     end
 
     return _df
+end
+
+function make_mean_df(df_vec::Vector{DataFrame}, key_columns::Vector{String}, value_columns::Vector{String})::DataFrame
+    mean_df = vcat([calc_mean(df, key_columns, value_columns) for df in df_vec]...)
+
+    return sort(mean_df, key_columns)
 end
 
 function make_mean_df(df_vec::Vector{DataFrame})::DataFrame
