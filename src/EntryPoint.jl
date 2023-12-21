@@ -3,52 +3,23 @@ module EntryPoint
 using DataFrames: DataFrame
 using Random: MersenneTwister
 
-include("./Output.jl")
-using .Output: Output
-using .Output.Simulation: Param, Model, ModelPopulation, ModelPayoff, C, D, interaction!, death_and_birth!
-
-@enum Mode Population Payoff
-
-function run(
-    param::Output.Simulation.Param,
-    mode::Mode = Population,
-    log_level::Int = 0,
-    log_rate::Float64 = 0.5,
-)::DataFrame
-    model = (mode == Population) ? ModelPopulation(param) : ModelPayoff(param)
-    model.strategy_vec = rand(model.param.rng, [C, D], model.param.initial_N)
-    # model.strategy_vec = fill(C, model.param.initial_N)
-    output_df = Output.make_output_df(param)
-
-    for generation = 1:(model.param.generations)
-        if mode == Population
-            interaction!(model)
-            death_and_birth!(model, generation)
-        elseif mode == Payoff
-            interaction!(model, generation)
-            death_and_birth!(model)
-        end
-
-        if generation > param.generations * log_rate
-            Output.log!(output_df, generation, model, log_level)
-        end
-    end
-
-    return output_df
-end
+include("./Simulation.jl")
+using .Simulation: Param, POPULATION, PAYOFF, run
 
 @kwdef struct ParamOptions
     initial_N_vec = [1_000]
-    T_vec = [1.15]   # 0.0:0.1:2.0, [0.9, 1.1]
+    initial_T_vec = [1.15]   # 0.0:0.1:2.0, [0.9, 1.1]
     S_vec = [-0.1]  # -1.0:0.1:1.0, [-0.1, 0.1]
     initial_graph_weight_vec = [0.2]
     interaction_freqency_vec = [1.0]
-    relationship_volatility_vec = [0.1]
+    Δw_vec = [0.1]
+    reproduction_rate_vec = [0.05]
     δ_vec = [1.0]
     μ_vec = [0.01]
-    β_σ_vec = vec([(β, σ) for β = 0.0:0.1:1.0, σ = 0.0:0.1:1.0])
+    β_sigma_vec = vec([(β, sigma) for β = 0.0:0.1:1.0, sigma = 0.0:10.0:100.0])
     generations_vec = [10_000]
-    trials = 10
+    variability_mode = POPULATION
+    trials = 1
 end
 
 function to_vector(params::ParamOptions)::Vector{Param}
@@ -56,31 +27,34 @@ function to_vector(params::ParamOptions)::Vector{Param}
     seed_counter = rand(UInt)
     for _ = 1:(params.trials)
         for initial_N in params.initial_N_vec,
-            T in params.T_vec,
+            initial_T in params.initial_T_vec,
             S in params.S_vec,
             initial_graph_weight in params.initial_graph_weight_vec,
             interaction_freqency in params.interaction_freqency_vec,
-            relationship_volatility in params.relationship_volatility_vec,
+            Δw in params.Δw_vec,
+            reproduction_rate in params.reproduction_rate_vec,
             δ in params.δ_vec,
             μ in params.μ_vec,
-            β_σ in params.β_σ_vec,
+            β_sigma in params.β_sigma_vec,
             generations in params.generations_vec
 
             push!(
                 result,
                 Param(
                     initial_N = initial_N,
-                    T = T,
+                    initial_T = initial_T,
                     S = S,
                     interaction_freqency = interaction_freqency,
                     initial_graph_weight = initial_graph_weight,
-                    relationship_volatility = relationship_volatility,
+                    Δw = Δw,
+                    reproduction_rate = reproduction_rate,
                     δ = δ,
                     μ = μ,
-                    β = β_σ[1],
-                    σ = β_σ[2],
+                    β = β_sigma[1],
+                    sigma = β_sigma[2],
                     generations = generations,
                     rng = MersenneTwister(seed_counter),
+                    variability_mode = params.variability_mode,
                 ),
             )
             seed_counter += 1
@@ -95,7 +69,7 @@ end  # end of module
 if abspath(PROGRAM_FILE) == @__FILE__
     using CSV: write
     using Dates
-    using .EntryPoint: ParamOptions, to_vector, run, Population, Payoff
+    using .EntryPoint: Simulation, ParamOptions, to_vector
 
     const PARAM_OPTIONS = to_vector(ParamOptions())
     const DIR_NAME = "output/$(Dates.format(now(), "yyyymmdd_HHMMSS"))"
@@ -104,7 +78,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
     mkdir(DIR_NAME)
 
     Threads.@threads for i in eachindex(PARAM_OPTIONS)
-        # write("$(DIR_NAME)/$(i).csv", run(PARAM_OPTIONS[i], Population, LOG_LEVEL))
-        write("$(DIR_NAME)/$(i).csv", run(PARAM_OPTIONS[i], Payoff, LOG_LEVEL))
+        write("$(DIR_NAME)/$(i).csv", Simulation.run(PARAM_OPTIONS[i], log_level = LOG_LEVEL))
     end
 end

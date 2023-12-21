@@ -17,8 +17,6 @@ test_simulation:
 	$(JULIA_CMD) test/ModelPopulationTest.jl
 	@echo "\nRunning test/ModelPayoffTest.jl\n"
 	$(JULIA_CMD) test/ModelPayoffTest.jl
-
-test_output:
 	@echo "\nRunning test/OutputTest.jl\n"
 	$(JULIA_CMD) test/OutputTest.jl
 
