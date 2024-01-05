@@ -1,22 +1,26 @@
 module Simulation
 
-using DataFrames: DataFrame, nrow, dropmissing, select!, Not
-using Graphs: SimpleGraph, degree, gdistances, local_clustering_coefficient, connected_components
-using LinearAlgebra
 using Random: MersenneTwister
 using StatsBase: mean, std, sample, Weights
 
-export Model, Param, C, D, POPULATION, PAYOFF, interaction!, death_and_birth!, run
+using DataFrames: DataFrame, select!, Not
 
-@enum VariabilityMode POPULATION PAYOFF
-const VARIABILITY_MODE = Dict(POPULATION => "POPULATION", PAYOFF => "PAYOFF")
+using Graphs
+using SimpleWeightedGraphs
+
+include("../src/Network.jl")
+using .Network: create_regular_weighted_graph, weighted_to_simple, weighted_to_2nd_order, rem_vertices!
+
+export Model, Param, C, D, POPULATION, PAYOFF, interaction!, death!, birth!, log!, run
+
+@enum VariabilityMode POPULATION PAYOFF MUTATION
+const VARIABILITY_MODE = Dict(POPULATION => "POPULATION", PAYOFF => "PAYOFF", MUTATION => "MUTATION")
 
 @enum Strategy C D
+
 const WEAK_THRESHOLD = 0.25
 const MEDIUM_THRESHOLD = 0.50
 const STRONG_THRESHOLD = 0.75
-
-invert(s::Strategy)::Strategy = (s == C ? D : C)
 
 """
     ar1(β::Float64, σ::Float64, μ::Float64, T::Int, rng::MersenneTwister)::Vector{Float64}
@@ -42,19 +46,21 @@ end
 
 @kwdef struct Param
     initial_N::Int = 1_000
+    initial_k::Int = 10
     initial_T::Float64 = 1.1                 # Temptation payoff
     S::Float64 = -0.1                        # Sucker's payoff
-    initial_graph_weight::Float64 = 0.5
-    interaction_freqency::Float64 = 1.0
+    initial_w::Float64 = 0.5
     Δw::Float64 = 0.1
+    interaction_freqency::Float64 = 1.0
     reproduction_rate::Float64 = 0.1
     δ::Float64 = 0.01                        # strength of selection
-    μ::Float64 = 0.0                         # mutation rate
-    β::Float64 = 0.1                         # environmental volatility (自己回帰の係数)
+    initial_μ_s::Float64 = 0.0               # mutation rate of strategy
+    initial_μ_c::Float64 = 0.0               # mutation rate of connection
+    β::Float64 = 0.1                         # environmental volatility (自己回帰係数)
     sigma::Float64 = 0.1                     # environmental volatility (std of white noise)
     generations::Int = 100                   # generations (Time steps)
-    rng::MersenneTwister = MersenneTwister() # random seed
     variability_mode::VariabilityMode = POPULATION
+    rng::MersenneTwister = MersenneTwister() # random seed
 end
 
 function get_N_vec(p::Param)::Vector{Int}
@@ -63,8 +69,9 @@ function get_N_vec(p::Param)::Vector{Int}
     N_vec = ar1(p.β, p.sigma, Float64(p.initial_N), p.generations + 1, p.rng)
 
     for i = 2:(p.generations + 1)
-        N_vec[i] = clamp(N_vec[i], p.initial_N / 10, p.initial_N * 2)
-        N_vec[i] = clamp(N_vec[i], N_vec[i - 1] / 2 + 1, N_vec[i - 1] * 2 - 1)
+        lower_bound = max(p.initial_N / 10, N_vec[i - 1] / 2 + 1)
+        upper_bound = min(p.initial_N * 2, N_vec[i - 1] * 2 - 1)
+        N_vec[i] = clamp(N_vec[i], lower_bound, upper_bound)
     end
 
     return round.(Int, N_vec)
@@ -106,7 +113,7 @@ end
 function get_payoff_table_vec(p::Param)::Vector{Dict}
     if p.variability_mode == PAYOFF
         T_vec = ar1(p.β, p.sigma, p.initial_T, p.generations, p.rng)
-        T_vec = [clamp(T, 0.0, 2.0) for T in T_vec]
+        T_vec = clamp.(T_vec, 0.0, 2.0)
         return [Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, T), (D, C) => (T, p.S), (D, D) => (0.0, 0.0)) for T in T_vec]
     else
         payoff_table =
@@ -115,45 +122,51 @@ function get_payoff_table_vec(p::Param)::Vector{Dict}
     end
 end
 
+function get_μ_vec(p::Param, initial_μ::Float64)::Vector{Float16}
+    if p.variability_mode == MUTATION
+        μ_vec = ar1(p.β, p.sigma, initial_μ, p.generations, p.rng)
+        μ_vec = clamp.(μ_vec, 0.0, 1.0)
+        return Float16.(μ_vec)
+    else
+        return fill(Float16(initial_μ), p.generations)
+    end
+end
+
 mutable struct Model
-    # model's parameters
-    ## constant value
     param::Param
-    ## temporal value
     generation::Int
-    N::Int  # agents' population
-    ## time series values
-    N_vec::Vector{Int}
-    interaction_N_vec::Vector{Int}
+
+    # environmental variables
     death_N_vec::Vector{Int}
     birth_N_vec::Vector{Int}
     payoff_table_vec::Vector{Dict{Tuple{Strategy,Strategy},Tuple{Float64,Float64}}}
+    μ_s_vec::Vector{Float16}
+    μ_c_vec::Vector{Float16}
 
     # agent's parameters
     strategy_vec::Vector{Strategy}     # agents' strategy
     payoff_vec::Vector{Float64}        # agents' payoff
-    graph_weights::Matrix{Float16}     # agents' relationship
+    graph::SimpleWeightedGraph
 
-    function Model(p::Param)
-        N_vec = get_N_vec(p)
-        (death_N_vec, birth_N_vec) = get_death_birth_N_vec(p, N_vec)
+    function Model(param::Param)
+        N_vec = get_N_vec(param)
+        (death_N_vec, birth_N_vec) = get_death_birth_N_vec(param, N_vec)
 
         new(
-            ## constant value
-            p,
-            ## temporal value
-            1,
-            p.initial_N,
-            ## time series values
-            N_vec,
-            round.(Int, N_vec .* p.interaction_freqency),
+            param,
+            1,  # generation
+
+            # environmental variables
             death_N_vec,
             birth_N_vec,
-            get_payoff_table_vec(p),
+            get_payoff_table_vec(param),
+            get_μ_vec(param, param.initial_μ_s),
+            get_μ_vec(param, param.initial_μ_c),
+
             # agent's parameters
-            fill(D, p.initial_N),
-            fill(0.0, p.initial_N),
-            (fill(1.0, (p.initial_N, p.initial_N)) - Matrix(I, p.initial_N, p.initial_N)) * p.initial_graph_weight,
+            fill(D, param.initial_N),
+            fill(0.0, param.initial_N),
+            create_regular_weighted_graph(param.initial_N, param.initial_k, param.initial_w),
         )
     end
 end
@@ -180,33 +193,37 @@ end
     - Otherwise, the weight is decreased by v.
 """
 function interaction!(model::Model)::Nothing
+    N = nv(model.graph)
+    interaction_N = round(Int, N * model.param.interaction_freqency)
     payoff_table = model.payoff_table_vec[model.generation]
 
-    focal_id_vec = sample(model.param.rng, 1:(model.N), model.interaction_N_vec[model.generation], replace = false)
-    all_ids = collect(1:(model.N))
-    temp_weights = Vector{Float16}(undef, model.N - 1)
-    update_weights = fill(Float16(1.0), (model.N, model.N))
+    focal_id_vec = sample(model.param.rng, 1:N, interaction_N, replace = false)
+    update_weights = []
 
-    @inbounds for focal_id in focal_id_vec
+    for focal_id in focal_id_vec
         # Pick an opponent
-        neighbors = deleteat!(copy(all_ids), focal_id)
-        @views temp_weights .= model.graph_weights[focal_id, neighbors]
-        opponent_id = sample(model.param.rng, neighbors, Weights(temp_weights))
+        opponent_vec = neighbors(model.graph, focal_id)
+        weights = get_weight.(Ref(model.graph), Ref(focal_id), opponent_vec)
+        opponent_id = sample(model.param.rng, opponent_vec, Weights(weights))
 
+        # strategy
         strategy_pair = (model.strategy_vec[focal_id], model.strategy_vec[opponent_id])
 
-        # Update payoff
+        # payoff
         focal_payoff, opponent_payoff = payoff_table[strategy_pair]
         model.payoff_vec[focal_id] += focal_payoff
         model.payoff_vec[opponent_id] += opponent_payoff
 
-        # for updating relationships
-        increment = model.param.Δw * (strategy_pair == (C, C) ? 1 : -1)
-        update_weights[focal_id, opponent_id] = update_weights[opponent_id, focal_id] *= (1.0 + increment)
+        # graph
+        push!(update_weights, (focal_id, opponent_id, strategy_pair == (C, C)))
     end
 
-    # Update relationships
-    model.graph_weights = min.(model.graph_weights .* update_weights, 1.0)
+    # graph
+    for (focal_id, opponent_id, up) in update_weights
+        model.graph.weights[focal_id, opponent_id] *= (1.0 + model.param.Δw * (up ? +1.0 : -1.0))
+        model.graph.weights[focal_id, opponent_id] = min(model.graph.weights[focal_id, opponent_id], 1.0)
+        model.graph.weights[opponent_id, focal_id] = model.graph.weights[focal_id, opponent_id]
+    end
 
     return
 end
@@ -215,111 +232,94 @@ classic_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 - δ + δ * payoff
 
 sigmoid_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 / (1.0 + exp(-δ * payoff))
 
-function pick_deaths(model::Model)::Vector{Int}
+function pick_deaths(model::Model, rng::MersenneTwister)::Vector{Int}
+    N = nv(model.graph)
     death_N = model.death_N_vec[model.generation]
     neg_fitness_vec = sigmoid_fitness.(-model.payoff_vec, model.param.δ)
-    death_id_vec = sample(model.param.rng, 1:(model.N), Weights(neg_fitness_vec), death_N, replace = false)
+    death_id_vec = sample(rng, 1:N, Weights(neg_fitness_vec), death_N, replace = false)
 
     return sort(death_id_vec)
 end
 
-function pick_parents(model::Model)::Vector{Int}
+function pick_parents(model::Model, rng::MersenneTwister)::Vector{Int}
+    N = nv(model.graph)
     birth_N = model.birth_N_vec[model.generation]
     fitness_vec = sigmoid_fitness.(model.payoff_vec, model.param.δ)
-    parent_id_vec = sample(model.param.rng, 1:(model.N), Weights(fitness_vec), birth_N, replace = false)
+    parent_id_vec = sample(rng, 1:N, Weights(fitness_vec), birth_N, replace = false)
 
     return sort(parent_id_vec)
 end
 
-function normalize_graph_weights!(graph_weights::Matrix{Float16}, N::Int, initial_graph_weight::Float64)::Nothing
-    initial_graph_weight_sum = N * (N - 1) * initial_graph_weight
-
-    # factor = sum(Float64.(graph_weights))
-    factor = 0.0
-    @inbounds @simd for weight in graph_weights
-        factor += Float64(weight)
-    end
-
-    # graph_weights ./= (factor / initial_graph_weight_sum)
-    factor = Float16(initial_graph_weight_sum / factor)
-    @inbounds @simd for i in eachindex(graph_weights)
-        graph_weights[i] *= factor
-    end
-
-    return
-end
-
 """
-    death_and_reproduction!(model::Model)::Tuple{Vector{Int},Vector{Int}}
+    death!(model::Model)::Vector{Int}
 
 - Some agents die based on fitness.
+"""
+function death!(model::Model, rng::MersenneTwister)::Vector{Int}
+    death_id_vec = pick_deaths(model, rng)
+    deleteat!(model.strategy_vec, death_id_vec)
+    deleteat!(model.payoff_vec, death_id_vec)
+    rem_vertices!(model.graph, death_id_vec)
+
+    # connect orphan nodes to a random node if they exist.
+    N = nv(model.graph)
+    for orphan = 1:N
+        if isempty(neighbors(model.graph, orphan))
+            add_edge!(model.graph, orphan, rand(rng, setdiff(1:N, [orphan])), 1.0)
+        end
+    end
+
+    return death_id_vec
+end
+
+invert(s::Strategy)::Strategy = (s == C ? D : C)
+
+"""
+    birth!(model::Model)::Vector{Int}
+
 - Some agents reproduce based on fitness.
 - Child copies the parent's strategy.
 - Child copies the parent's relationship.
 - Strategy is mutated based on mutation rate.
 """
-function death_and_birth!(model::Model)::Tuple{Vector{Int},Vector{Int}}
-    death_id_vec = []
-    parent_id_vec = []
+function birth!(model::Model, rng::MersenneTwister)::Vector{Int}
+    parent_id_vec = pick_parents(model, rng)
+    birth_N = length(parent_id_vec)
+    N = nv(model.graph)
+    child_id_vec = collect((N + 1):(N + birth_N))
 
-    # death
-    death_id_vec = pick_deaths(model)
-    survived_index = deleteat!(collect(1:(model.N)), death_id_vec)
-    deleteat!(model.strategy_vec, death_id_vec)
-    deleteat!(model.payoff_vec, death_id_vec)
-    model.N -= model.death_N_vec[model.generation]
+    # strategy
+    mutate_vec = rand(rng, birth_N) .< model.μ_s_vec[model.generation]
+    strategy_vec = model.strategy_vec[parent_id_vec]
+    strategy_vec = [mutate ? invert(strategy) : strategy for (strategy, mutate) in zip(strategy_vec, mutate_vec)]
+    append!(model.strategy_vec, strategy_vec)
 
-    # model.graph_weights = model.graph_weights[survived_index, survived_index]
-    _new_weights = fill(Float16(0.0), model.N, model.N)
-    @inbounds for x = 1:(model.N)
-        @simd for y = 1:(model.N)
-            _new_weights[x, y] = model.graph_weights[survived_index[x], survived_index[y]]
+    # payoff
+    append!(model.payoff_vec, zeros(Float64, birth_N))
+
+    # graph
+    add_vertices!(model.graph, birth_N)
+    for (parent_id, child_id) in zip(parent_id_vec, child_id_vec)
+        ## inherit parent's connection
+        neighbor_vec = copy(neighbors(model.graph, parent_id))
+        for neighbor in neighbor_vec
+            weight = get_weight(model.graph, parent_id, neighbor)
+            if rand(rng) > model.μ_c_vec[model.generation]
+                add_edge!(model.graph, child_id, neighbor, weight)
+            else
+                alien_id = child_id
+                while alien_id == child_id
+                    alien_id = rand(rng, 1:N)
+                end
+                add_edge!(model.graph, child_id, alien_id, weight)
+            end
         end
-    end
-    model.graph_weights = _new_weights
 
-    # birth
-    parent_id_vec = pick_parents(model)
-    birth_N = model.birth_N_vec[model.generation]
-    mutation_vec = rand(model.param.rng, birth_N) .< model.param.μ
-
-    for i = 1:birth_N
-        # strategy
-        parent_strategy = model.strategy_vec[parent_id_vec[i]]
-        parent_strategy = mutation_vec[i] ? invert(parent_strategy) : parent_strategy
-        push!(model.strategy_vec, parent_strategy)
-
-        # payoff
-        push!(model.payoff_vec, 0.0)
+        ## connect parent and child
+        add_edge!(model.graph, parent_id, child_id, 1.0)
     end
 
-    model.N += birth_N
-    old_n = model.N - birth_N
-
-    # relationship
-    # model.graph_weights = vcat(model.graph_weights, fill(Float16(0.0), (n_births, model.N)))
-    # model.N += n_births
-    # model.graph_weights = hcat(model.graph_weights, fill(Float16(0.0), (model.N, n_births)))
-    # model.graph_weights[(model.N-n_births+1):end, :] = model.graph_weights[parent_id_vec, :]
-    # model.graph_weights[:, (model.N-n_births+1):end] = model.graph_weights[:, parent_id_vec]
-    _new_weights = fill(Float16(0.0), (model.N, model.N))
-    @inbounds for x = 1:old_n
-        @simd for y = 1:old_n
-            _new_weights[x, y] = model.graph_weights[x, y]
-        end
-    end
-    @inbounds @simd for i = 1:birth_N
-        _new_weights[old_n + i, :] = _new_weights[parent_id_vec[i], :]
-        _new_weights[:, old_n + i] = _new_weights[:, parent_id_vec[i]]
-        _new_weights[parent_id_vec[i], old_n + i] = 1.0
-        _new_weights[old_n + i, parent_id_vec[i]] = 1.0
-        _new_weights[old_n + i, old_n + i] = 0.0
-    end
-    model.graph_weights = _new_weights
-
-    normalize_graph_weights!(model.graph_weights, model.N, model.param.initial_graph_weight)
-
-    return death_id_vec, parent_id_vec
+    return parent_id_vec
 end
 
 function initialize_column!(df::DataFrame, columns::Vector{Symbol}, value = Float16(0))
@@ -328,53 +328,36 @@ function initialize_column!(df::DataFrame, columns::Vector{Symbol}, value = Floa
     end
 end
 
-function make_output_df(param::Param)::DataFrame
-    # 1 〜 13
+function make_output_df(param::Param, log_level::Int, log_count::Int)::DataFrame
+    # 1 〜 15
     df = DataFrame([param])
     select!(df, Not([:rng]))
-    df = repeat(df, param.generations)
-    df.variability_mode = fill(VARIABILITY_MODE[param.variability_mode], param.generations)
-    # 14 〜 15
+    df = repeat(df, log_count)
+    df.variability_mode .= VARIABILITY_MODE[param.variability_mode]
+    # 16 〜 17
     initialize_column!(df, [:generation, :N], Int16(0))
-    # 16 〜 18
+    # 18 〜 20
     initialize_column!(df, [:T, :cooperation_rate, :payoff_μ])
-    # 19 〜 23
+
+    log_level == 0 && return df
+
+    # 21 〜 25
     initialize_column!(df, [:weak_k1, :weak_C1, :weak_comp1_count, :weak_comp1_size_μ, :weak_comp1_size_max])
-    # 24 〜 28
+    # 26 〜 30
     initialize_column!(df, [:medium_k1, :medium_C1, :medium_comp1_count, :medium_comp1_size_μ, :medium_comp1_size_max])
-    # 29 〜 33
+    # 31 〜 35
     initialize_column!(df, [:strong_k1, :strong_C1, :strong_comp1_count, :strong_comp1_size_μ, :strong_comp1_size_max])
-    # 34 〜 38
+
+    log_level <= 1 && return df
+
+    # 36 〜 40
     initialize_column!(df, [:weak_k2, :weak_C2, :weak_comp2_count, :weak_comp2_size_μ, :weak_comp2_size_max])
-    # 39 〜 43
+    # 41 〜 45
     initialize_column!(df, [:medium_k2, :medium_C2, :medium_comp2_count, :medium_comp2_size_μ, :medium_comp2_size_max])
-    # 44 〜 48
+    # 46 〜 50
     initialize_column!(df, [:strong_k2, :strong_C2, :strong_comp2_count, :strong_comp2_size_μ, :strong_comp2_size_max])
 
     return df
-end
-
-unweighted_graph(graph_weights::Matrix, threshold::Float64)::SimpleGraph = SimpleGraph(graph_weights .> threshold)
-
-function convert_to_2nd_order_weights(model::Model)::Matrix{Float16}
-    weights2 = fill(0.0, (model.N, model.N))
-
-    @inbounds for x = 1:(model.N)
-        x_weights = @views model.graph_weights[x, :]'
-        @simd for y = (x + 1):(model.N)
-            # weights2[x, y] = model.graph_weights[x, y] + x_weights * model.graph_weights[:, y]
-            sum = 0.0
-            for i = 1:(model.N)
-                sum += x_weights[i] * model.graph_weights[i, y]
-            end
-            weights2[x, y] = weights2[y, x] = model.graph_weights[x, y] + sum
-        end
-    end
-
-    weights2 = Float16.(weights2)
-    normalize_graph_weights!(weights2, model.N, model.param.initial_graph_weight)
-
-    return weights2
 end
 
 function calc(g::SimpleGraph, model::Model)::Tuple{Float16,Float16,Float16,Float16,Float16}
@@ -384,7 +367,7 @@ function calc(g::SimpleGraph, model::Model)::Tuple{Float16,Float16,Float16,Float
     component_count = 0
     sum_component_size = 0.0
     max_component_size = 0.0
-    n = length(model.strategy_vec)
+    n = nv(g)
 
     for component in connected_components(g)
         component_size = length(component)
@@ -418,59 +401,63 @@ end
 
 std_component_size(components::Vector{Int})::Float16 = Float16(length(components) > 1 ? std(components) : 0.0)
 
-function log!(output::DataFrame, model::Model, level::Int = 0, skip::Int = 10)::Nothing
-    output[model.generation, 14:18] = [
+function log!(output::DataFrame, model::Model, log_level::Int, log_row_n::Int)::Nothing
+    output[log_row_n, 16:20] = [
         model.generation,
-        model.N,       # population
+        nv(model.graph),       # population
         model.payoff_table_vec[model.generation][(D, C)][1], # T
         mean(model.strategy_vec .== C),    # cooperation rate
         mean(model.payoff_vec),            # average payoff
     ]
 
-    level == 0 && return
-
-    (model.generation % skip != 0) && return
+    log_level == 0 && return
 
     # 1st order connection
-    weak_connection_g = unweighted_graph(model.graph_weights, WEAK_THRESHOLD)  # costly
-    medium_connection_g = unweighted_graph(model.graph_weights, MEDIUM_THRESHOLD)  # costly
-    strong_connection_g = unweighted_graph(model.graph_weights, STRONG_THRESHOLD)  # costly
+    weak_connection_g = weighted_to_simple(model.graph, WEAK_THRESHOLD)  # costly
+    medium_connection_g = weighted_to_simple(model.graph, MEDIUM_THRESHOLD)  # costly
+    strong_connection_g = weighted_to_simple(model.graph, STRONG_THRESHOLD)  # costly
 
     # 平均次数, 平均クラスタ係数, コンポーネント数, 平均コンポーネントサイズ, 最大コンポーネントサイズ
-    output[model.generation, 19:23] = calc(weak_connection_g, model)
-    output[model.generation, 24:28] = calc(medium_connection_g, model)
-    output[model.generation, 29:33] = calc(strong_connection_g, model)
+    output[log_row_n, 21:25] = calc(weak_connection_g, model)
+    output[log_row_n, 26:30] = calc(medium_connection_g, model)
+    output[log_row_n, 31:35] = calc(strong_connection_g, model)
 
-    level <= 1 && return
+    log_level <= 1 && return
 
     # 2nd order connection
-    second_order_weights = convert_to_2nd_order_weights(model)
-    weak_connection2_g = unweighted_graph(second_order_weights, WEAK_THRESHOLD)  # costly
-    medium_connection2_g = unweighted_graph(second_order_weights, MEDIUM_THRESHOLD)  # costly
-    strong_connection2_g = unweighted_graph(second_order_weights, STRONG_THRESHOLD)  # costly
+    second_order_weighted = weighted_to_2nd_order(model.graph)
+    weak_connection2_g = weighted_to_simple(second_order_weighted, WEAK_THRESHOLD)  # costly
+    medium_connection2_g = weighted_to_simple(second_order_weighted, MEDIUM_THRESHOLD)  # costly
+    strong_connection2_g = weighted_to_simple(second_order_weighted, STRONG_THRESHOLD)  # costly
 
     # 平均次数, 平均クラスタ係数, コンポーネント数, 平均コンポーネントサイズ, 最大コンポーネントサイズ
-    output[model.generation, 34:38] = calc(weak_connection2_g, model)
-    output[model.generation, 39:43] = calc(medium_connection2_g, model)
-    output[model.generation, 44:48] = calc(strong_connection2_g, model)
+    output[log_row_n, 36:40] = calc(weak_connection2_g, model)
+    output[log_row_n, 41:45] = calc(medium_connection2_g, model)
+    output[log_row_n, 46:50] = calc(strong_connection2_g, model)
 
     return
 end
 
-function run(param::Param; log_level::Int = 0, log_rate::Float64 = 0.5)::DataFrame
+function run(param::Param; log_level::Int = 0, log_rate::Float64 = 0.5, log_skip::Int = 10)::DataFrame
     model = Model(param)
-    output_df = make_output_df(param)
+
+    start_gen = floor(Int, param.generations * (1 - log_rate)) + 1
+    log_generations = filter(x -> x % log_skip == 0, start_gen:(param.generations))
+    log_row_n = 1
+
+    output_df = make_output_df(param, log_level, length(log_generations))
 
     for generation = 1:(param.generations)
         model.generation = generation
-        model.N = model.N_vec[generation]
         model.payoff_vec .= 0.0
 
         interaction!(model)
-        death_and_birth!(model)
+        death!(model, param.rng)
+        birth!(model, param.rng)
 
-        if generation > param.generations * (1 - log_rate)
-            log!(output_df, model, log_level)
+        if generation ∈ log_generations
+            log!(output_df, model, log_level, log_row_n)
+            log_row_n += 1
         end
     end
 

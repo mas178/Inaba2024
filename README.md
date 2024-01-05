@@ -34,4 +34,11 @@ make update
 
 # Run 2 〜 5
 make all
+
+# Coverage
+julia --project=../Inaba2024 --code-coverage test/Ar1Test.jl
+julia --project=../Inaba2024 test/Coverage.jl
+genhtml coverage.lcov --output-directory coverage
+open -a "Google Chrome" coverage/index.html
+# covファイルの削除
 ```

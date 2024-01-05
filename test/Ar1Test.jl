@@ -133,3 +133,42 @@ end
     @test mean(T_vec) ≈ param.initial_T atol = param.initial_T * 0.1
     @test std(T_vec) ≈ sqrt(param.sigma^2 / (1 - param.β^2)) atol = param.sigma * 0.1
 end
+
+@testset "get_μ_s_vec" begin
+    initila_μ = 0.01
+    param = Simulation.Param(generations = 10)
+    @test Simulation.get_μ_vec(param, initila_μ) == fill(Float16(initila_μ), param.generations)
+
+    param = Simulation.Param(
+        generations = 10,
+        sigma = 0.01,
+        β = 0.1,
+        rng = MersenneTwister(1),
+        variability_mode = Simulation.MUTATION,
+    )
+    μ_s_vec = Simulation.get_μ_vec(param, initila_μ)
+    @test μ_s_vec[1] == Float16(initila_μ)
+    @test maximum(μ_s_vec) <= 1.0
+    @test minimum(μ_s_vec) >= 0.0
+    @test Simulation.get_μ_vec(param, initila_μ) ==
+          Float16[0.01, 0.01431, 0.01627, 0.02026, 0.01562, 0.005337, 0.01362, 0.00986, 0.00305, 0.0]
+
+    param = Simulation.Param(
+        generations = 10,
+        sigma = 0.01,
+        β = 0.1,
+        rng = MersenneTwister(2),
+        variability_mode = Simulation.MUTATION,
+    )
+    @test Simulation.get_μ_vec(param, initila_μ) ==
+          Float16[0.01, 0.0174, 0.003294, 0.003244, 0.0, 0.001452, 0.01471, 0.001855, 0.014366, 0.02292]
+
+    param = Simulation.Param(
+        generations = 10,
+        sigma = 0.1,
+        β = 0.5,
+        rng = MersenneTwister(3),
+        variability_mode = Simulation.MUTATION,
+    )
+    @test Simulation.get_μ_vec(param, initila_μ) == Float16[0.01, 0.1292, 0.0, 0.1213, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0921]
+end

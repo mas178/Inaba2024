@@ -13,12 +13,24 @@ test: test_simulation test_output test_entry_point test_sim_plot
 test_simulation:
 	@echo "\nRunning test/Ar1Test.jl\n"
 	$(JULIA_CMD) test/Ar1Test.jl
-	@echo "\nRunning test/ModelPopulationTest.jl\n"
-	$(JULIA_CMD) test/ModelPopulationTest.jl
-	@echo "\nRunning test/ModelPayoffTest.jl\n"
-	$(JULIA_CMD) test/ModelPayoffTest.jl
-	@echo "\nRunning test/OutputTest.jl\n"
-	$(JULIA_CMD) test/OutputTest.jl
+
+	@echo "\nRunning test/NetworkTest.jl\n"
+	$(JULIA_CMD) test/NetworkTest.jl
+
+	@echo "\nRunning test/ModelTest.jl\n"
+	$(JULIA_CMD) test/ModelTest.jl
+
+	@echo "\nRunning test/InteractionTest.jl\n"
+	$(JULIA_CMD) test/InteractionTest.jl
+
+	@echo "\nRunning test/DeathBirthTest.jl\n"
+	$(JULIA_CMD) test/DeathBirthTest.jl
+
+	@echo "\nRunning test/RunTest.jl\n"
+	$(JULIA_CMD) test/RunTest.jl
+
+	@echo "\nRunning test/LogTest.jl\n"
+	$(JULIA_CMD) test/LogTest.jl
 
 test_entry_point:
 	@echo "\nRunning test/EntryPointTest.jl\n"
