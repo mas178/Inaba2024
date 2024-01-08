@@ -4,12 +4,13 @@ using Random
 using StatsBase
 
 using Graphs
-using SimpleWeightedGraphs
 
 using Test: @testset, @test
 
 include("../src/Simulation.jl")
 using .Simulation: Model, Param, C, D, pick_deaths, pick_parents, death!, birth!, VARIABILITY_MODE
+include("../src/Network.jl")
+using .Network: nv, update_weight!, rem_edge!, neighbors
 
 @testset "invert" begin
     @test Simulation.invert(C) == D
@@ -249,29 +250,29 @@ end
             node_id = 11
             for i = 1:11
                 if i < 6
-                    add_edge!(model.graph, node_id, node_id + i - 6, i / 10)
+                    update_weight!(model.weights, node_id, node_id + i - 6, Float16(i / 10))
                 elseif i > 6
-                    add_edge!(model.graph, node_id, node_id + i - 6, (i - 1) / 10)
+                    update_weight!(model.weights, node_id, node_id + i - 6, Float16((i - 1) / 10))
                 end
             end
-            neighbor_vec = neighbors(model.graph, node_id)
+            neighbor_vec = neighbors(model.weights, node_id)
             @test neighbor_vec == [6, 7, 8, 9, 10, 12, 13, 14, 15, 16]
-            @test [get_weight(model.graph, node_id, neighbor) for neighbor in neighbor_vec] == [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            @test model.weights[node_id, neighbor_vec] == Float16[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
             # execution
             death_id_vec = death!(model, MersenneTwister(1))
 
             # after
             @test death_id_vec == [9, 10]
-            @test nv(model.graph) == length(model.strategy_vec) == length(model.payoff_vec) == 98
-            @test model.graph.weights == transpose(model.graph.weights)  # check symmetry
-            @test diag(model.graph.weights) == fill(0.0, 98)  # diagonal is 0.0
+            @test nv(model.weights) == length(model.strategy_vec) == length(model.payoff_vec) == 98
+            @test model.weights == transpose(model.weights)  # check symmetry
+            @test diag(model.weights) == fill(Float16(0.0), 98)  # diagonal is 0.0
 
             ## グラフ上のIDが正しくズレていることを確認
             node_id = 9
-            neighbor_vec = neighbors(model.graph, node_id)
+            neighbor_vec = neighbors(model.weights, node_id)
             @test neighbor_vec == [6, 7, 8, 10, 11, 12, 13, 14]
-            @test [get_weight(model.graph, node_id, neighbor) for neighbor in neighbor_vec] == [0.1, 0.2, 0.3, 0.6, 0.7, 0.8, 0.9, 1.0]
+            @test model.weights[node_id, neighbor_vec] == Float16[0.1, 0.2, 0.3, 0.6, 0.7, 0.8, 0.9, 1.0]
         end
 
         @testset "2回目" begin
@@ -281,28 +282,28 @@ end
             node_id = 90
             for i = 1:11
                 if i < 6
-                    add_edge!(model.graph, node_id, node_id + i - 6, i / 10)
+                    update_weight!(model.weights, node_id, node_id + i - 6, Float16(i / 10))
                 elseif i > 6
-                    add_edge!(model.graph, node_id, node_id + i - 6, (i - 1) / 10)
+                    update_weight!(model.weights, node_id, node_id + i - 6, Float16((i - 1) / 10))
                 end
             end
-            neighbor_vec = neighbors(model.graph, node_id)
+            neighbor_vec = neighbors(model.weights, node_id)
             @test neighbor_vec == [85, 86, 87, 88, 89, 91, 92, 93, 94, 95]
-            @test [get_weight(model.graph, node_id, neighbor) for neighbor in neighbor_vec] == [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            @test model.weights[node_id, neighbor_vec] == Float16[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
             # execution
             death_id_vec = death!(model, MersenneTwister(2))
 
             # after
             @test death_id_vec == [29, 56, 76, 87]
-            @test nv(model.graph) == length(model.strategy_vec) == length(model.payoff_vec) == 94
-            @test model.graph.weights == transpose(model.graph.weights)  # is symmetry
-            @test diag(model.graph.weights) == fill(0.0, 94)  # diagonal is 0.0
+            @test nv(model.weights) == length(model.strategy_vec) == length(model.payoff_vec) == 94
+            @test model.weights == transpose(model.weights)  # is symmetry
+            @test diag(model.weights) == fill(0.0, 94)  # diagonal is 0.0
 
             ## グラフ上のIDが正しくズレていることを確認
-            neighbor_vec = neighbors(model.graph, node_id)
+            neighbor_vec = neighbors(model.weights, node_id)
             @test neighbor_vec == [1, 85, 86, 87, 88, 89, 91, 92, 93, 94]
-            @test [get_weight(model.graph, node_id, neighbor) for neighbor in neighbor_vec] == [0.5, 0.5, 0.9, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+            @test model.weights[node_id, neighbor_vec] == Float16[0.5, 0.5, 0.9, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
         end
 
         @testset "3回目: 孤立したノードが適切に再接続されていることを確認" begin
@@ -312,27 +313,27 @@ end
 
             # death!実行時に11が死ぬことを見越して、事前にそれ以外のノードとのコネクションを切っておく
             node_id = 10
-            @test neighbors(model.graph, node_id) == [7, 8, 9, 11, 12, 13, 14, 15]
-            neighbor_vec = copy(neighbors(model.graph, node_id))
+            @test neighbors(model.weights, node_id) == [7, 8, 9, 11, 12, 13, 14, 15]
+            neighbor_vec = copy(neighbors(model.weights, node_id))
             for neighbor in neighbor_vec
                 if neighbor != 11
-                    rem_edge!(model.graph, node_id, neighbor)
+                    rem_edge!(model.weights, node_id, neighbor)
                 end
             end
-            @test neighbors(model.graph, node_id) == [11]
+            @test neighbors(model.weights, node_id) == [11]
 
             # execution
             death_id_vec = death!(model, MersenneTwister(3))
 
             # after
             @test death_id_vec == [11, 27, 51, 77]
-            @test nv(model.graph) == length(model.strategy_vec) == length(model.payoff_vec) == 90
-            @test model.graph.weights == transpose(model.graph.weights)  # is symmetry
-            @test diag(model.graph.weights) == fill(0.0, 90)  # diagonal is 0.0
+            @test nv(model.weights) == length(model.strategy_vec) == length(model.payoff_vec) == 90
+            @test model.weights == transpose(model.weights)  # is symmetry
+            @test diag(model.weights) == fill(0.0, 90)  # diagonal is 0.0
 
             ## 孤立したノードが適切に再接続されていることを確認
-            @test neighbors(model.graph, node_id) == [38]
-            @test get_weight(model.graph, node_id, 38) == 1.0
+            @test neighbors(model.weights, node_id) == [38]
+            @test model.weights[node_id, 38] == Float16(1.0)
         end
     end
 end
@@ -341,9 +342,9 @@ end
     for mode in keys(VARIABILITY_MODE)
         model = Model(Param(initial_N = 100, initial_k = 10, variability_mode = mode))
         for node_id = 1:100
-            for neighbor_id in neighbors(model.graph, node_id)
+            for neighbor_id in neighbors(model.weights, node_id)
                 if node_id < neighbor_id
-                    add_edge!(model.graph, node_id, neighbor_id, node_id * neighbor_id / 10_000)
+                    update_weight!(model.weights, node_id, neighbor_id, Float16(node_id * neighbor_id / 10_000))
                 end
             end
         end
@@ -361,22 +362,22 @@ end
             @test parent_id_vec == [6, 61, 75]
 
             # after
-            @test nv(model.graph) == length(model.strategy_vec) == length(model.payoff_vec) == 103
+            @test nv(model.weights) == length(model.strategy_vec) == length(model.payoff_vec) == 103
             @test model.strategy_vec[101:103] == [C, C, C]
-            @test model.graph.weights == transpose(model.graph.weights)  # check symmetry
-            @test diag(model.graph.weights) == fill(0.0, 103)  # diagonal is 0.0
+            @test model.weights == transpose(model.weights)  # check symmetry
+            @test diag(model.weights) == fill(0.0, 103)  # diagonal is 0.0
 
             _index = setdiff(1:103, [6, 101])
-            @test model.graph.weights[6, 101] == 1.0
-            @test model.graph.weights[6, _index] == model.graph.weights[101, _index]
+            @test model.weights[6, 101] == Float16(1.0)
+            @test model.weights[6, _index] == model.weights[101, _index]
 
             _index = setdiff(1:103, [61, 102])
-            @test model.graph.weights[61, 102] == 1.0
-            @test model.graph.weights[61, _index] == model.graph.weights[102, _index]
+            @test model.weights[61, 102] == Float16(1.0)
+            @test model.weights[61, _index] == model.weights[102, _index]
 
             _index = setdiff(1:103, [75, 103])
-            @test model.graph.weights[75, 103] == 1.0
-            @test model.graph.weights[75, _index] == model.graph.weights[103, _index]
+            @test model.weights[75, 103] == Float16(1.0)
+            @test model.weights[75, _index] == model.weights[103, _index]
         end
 
         @testset "μ_c = 0.5, μ_s = 0.5" begin
@@ -392,28 +393,25 @@ end
             @test parent_id_vec == [6, 61, 75]
 
             # after
-            @test nv(model.graph) == length(model.strategy_vec) == length(model.payoff_vec) == 106
+            @test nv(model.weights) == length(model.strategy_vec) == length(model.payoff_vec) == 106
             @test model.strategy_vec[104:106] == [D, C, D]
-            @test model.graph.weights == transpose(model.graph.weights)  # check symmetry
-            @test diag(model.graph.weights) == fill(0.0, 106)  # diagonal is 0.0
+            @test model.weights == transpose(model.weights)  # check symmetry
+            @test diag(model.weights) == fill(0.0, 106)  # diagonal is 0.0
 
-            _index = setdiff(1:106, [6, 104])
-            @test model.graph.weights[6, 104] == 1.0
-            @test neighbors(model.graph, 6) == [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 101, 104]
-            @test neighbors(model.graph, 104) == [1, 5, 6, 8, 28, 31, 56, 79, 80, 83, 86, 101]
-            @test Set(model.graph.weights[6, _index]) == Set(model.graph.weights[104, _index])
+            @test model.weights[6, 104] == Float16(1.0)
+            @test neighbors(model.weights, 6) == [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 101, 104]
+            @test neighbors(model.weights, 104) == [1, 5, 6, 8, 29, 32, 58, 81, 82, 86, 89, 101]
+            @test Set(model.weights[6, :]) == Set(model.weights[104, :])
 
-            _index = setdiff(1:106, [61, 105])
-            @test model.graph.weights[61, 105] == 1.0
-            @test neighbors(model.graph, 61) == [56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 102, 105]
-            @test neighbors(model.graph, 105) == [11, 23, 24, 57, 58, 61, 62, 63, 64, 66, 90, 92]
-            @test Set(model.graph.weights[61, _index]) == Set(model.graph.weights[105, _index])
+            @test model.weights[61, 105] == Float16(1.0)
+            @test neighbors(model.weights, 61) == [56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 102, 105]
+            @test neighbors(model.weights, 105) == [11, 23, 25, 57, 58, 61, 62, 63, 64, 66, 93, 94]
+            @test Set(model.weights[61, :]) == Set(model.weights[105, :])
 
-            _index = setdiff(1:106, [75, 106])
-            @test model.graph.weights[75, 106] == 1.0
-            @test neighbors(model.graph, 75) == [70, 71, 72, 73, 74, 76, 77, 78, 79, 80, 103, 106]
-            @test neighbors(model.graph, 106) == [65, 71, 72, 74, 75, 77, 78, 79, 80, 86, 100, 103]
-            @test Set(model.graph.weights[75, _index]) == Set(model.graph.weights[106, _index])
+            @test model.weights[75, 106] == Float16(1.0)
+            @test neighbors(model.weights, 75) == [70, 71, 72, 73, 74, 76, 77, 78, 79, 80, 103, 106]
+            @test neighbors(model.weights, 106) == [66, 71, 72, 74, 75, 78, 79, 80, 88, 91, 101, 103]
+            @test Set(model.weights[75, :]) == Set(model.weights[106, :])
         end
     end
 end

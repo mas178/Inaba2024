@@ -9,7 +9,7 @@ using Test: @testset, @test
 include("../src/Simulation.jl")
 include("../src/Network.jl")
 using .Simulation: Param, Model, C, D, MUTATION, make_output_df, log!
-using .Network: create_regular_weighted_graph, weighted_to_2nd_order
+using .Network: create_adjacency_matrix, rem_edge!, neighbors
 
 @testset "log!" begin
     log_level = 2
@@ -53,7 +53,7 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
         @test output[:, 2] == fill(4, 11)
         @test output[:, 3] == fill(1.1, 11)
         @test output[:, 4] == fill(0.2, 11)
-        @test output[:, 5] == fill(0.43, 11)
+        @test output[:, 5] == fill(Float16(0.43), 11)
         @test output[:, 6] == fill(0.2, 11)
         @test output[:, 7] == fill(0.6, 11)
         @test output[:, 8] == fill(0.15, 11)
@@ -77,7 +77,7 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
 
         for i = 1:100
             model.generation = i
-            model.graph = create_regular_weighted_graph(i * 10, 2, 0.2)
+            model.weights = create_adjacency_matrix(i * 10, 2, Float16(0.2))
             model.strategy_vec = [x <= i ? C : D for x = 1:1000]
             model.payoff_vec = [x <= i ? 0 : 1 for x = 1:1000]
 
@@ -101,7 +101,7 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
             model.strategy_vec = [fill(C, 5)..., fill(D, 5)...]
 
             for (strength, threashold) in [("weak", 0.26), ("medium", 0.51), ("strong", 0.76)]
-                model.graph = create_regular_weighted_graph(10, 4, threashold)
+                model.weights = create_adjacency_matrix(10, 4, Float16(threashold))
 
                 log!(output, model, log_level, 1)
 
@@ -117,7 +117,7 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
             model.strategy_vec = [fill(C, 5)..., fill(D, 5)...]
 
             for (strength, threashold) in [("weak", 0.25), ("medium", 0.5), ("strong", 0.75)]
-                model.graph = create_regular_weighted_graph(10, 4, threashold)
+                model.weights = create_adjacency_matrix(10, 4, Float16(threashold))
 
                 log!(output, model, log_level, 1)
 
@@ -133,7 +133,7 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
             model.strategy_vec = [fill(C, 4)..., fill(D, 6)...]
 
             for (strength, threashold) in [("weak", 0.26), ("medium", 0.51), ("strong", 0.76)]
-                model.graph = create_regular_weighted_graph(10, 4, threashold)
+                model.weights = create_adjacency_matrix(10, 4, Float16(threashold))
 
                 log!(output, model, log_level, 1)
 
@@ -149,20 +149,20 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
             model.strategy_vec .= C
 
             for (strength, threashold) in [("weak", 0.26), ("medium", 0.51), ("strong", 0.76)]
-                model.graph = create_regular_weighted_graph(10, 4, threashold)
+                model.weights = create_adjacency_matrix(10, 4, Float16(threashold))
 
                 # {1, 2, 3} を切り離す
-                rem_edge!(model.graph, 1, 9)
-                rem_edge!(model.graph, 1, 10)
-                rem_edge!(model.graph, 2, 10)
-                rem_edge!(model.graph, 2, 4)
-                rem_edge!(model.graph, 3, 4)
-                rem_edge!(model.graph, 3, 5)
+                rem_edge!(model.weights, 1, 9)
+                rem_edge!(model.weights, 1, 10)
+                rem_edge!(model.weights, 2, 10)
+                rem_edge!(model.weights, 2, 4)
+                rem_edge!(model.weights, 3, 4)
+                rem_edge!(model.weights, 3, 5)
 
                 # {7} を切り離す
-                neighbord_vec = copy(neighbors(model.graph, 7))
+                neighbord_vec = copy(neighbors(model.weights, 7))
                 for neightbor_id in neighbord_vec
-                    rem_edge!(model.graph, 7, neightbor_id)
+                    rem_edge!(model.weights, 7, neightbor_id)
                 end
 
                 log!(output, model, log_level, 1)
@@ -185,7 +185,7 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
             model.strategy_vec = [fill(C, 5)..., fill(D, 5)...]
 
             for (strength, threashold) in [("weak", 0.26), ("medium", 0.51), ("strong", 0.76)]
-                model.graph = create_regular_weighted_graph(10, 4, threashold)
+                model.weights = create_adjacency_matrix(10, 4, Float16(threashold))
 
                 log!(output, model, log_level, 1)
 
@@ -197,7 +197,7 @@ using .Network: create_regular_weighted_graph, weighted_to_2nd_order
             end
 
             for (strength, threashold) in [("weak", 0.31), ("medium", 0.71)]
-                model.graph = create_regular_weighted_graph(10, 4, threashold)
+                model.weights = create_adjacency_matrix(10, 4, Float16(threashold))
 
                 log!(output, model, log_level, 1)
 

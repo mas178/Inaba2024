@@ -35,7 +35,7 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
         @test params[1].initial_k == 10
         @test params[1].initial_T == 0.1
         @test params[1].S == 0.3
-        @test params[1].initial_w == 0.21
+        @test params[1].initial_w == Float16(0.21)
         @test params[1].Δw == 0.1
         @test params[1].interaction_freqency == 0.31
         @test params[1].reproduction_rate == 0.05
@@ -51,7 +51,7 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
         @test params[124_416].initial_k == 20
         @test params[124_416].initial_T == 0.2
         @test params[124_416].S == 0.4
-        @test params[124_416].initial_w == 0.6
+        @test params[124_416].initial_w == Float16(0.6)
         @test params[124_416].Δw == 0.12
         @test params[124_416].interaction_freqency == 0.8
         @test params[124_416].reproduction_rate == 0.1

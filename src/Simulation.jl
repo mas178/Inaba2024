@@ -2,14 +2,12 @@ module Simulation
 
 using Random: MersenneTwister
 using StatsBase: mean, std, sample, Weights
-
+using Graphs
 using DataFrames: DataFrame, select!, Not
 
-using Graphs
-using SimpleWeightedGraphs
-
 include("../src/Network.jl")
-using .Network: create_regular_weighted_graph, weighted_to_simple, weighted_to_2nd_order, rem_vertices!
+using .Network:
+    nv, rem_vertices, update_weight!, rem_edge!, create_adjacency_matrix, weights_to_network, convert_2nd_order
 
 export Model, Param, C, D, POPULATION, PAYOFF, interaction!, death!, birth!, log!, run
 
@@ -49,7 +47,7 @@ end
     initial_k::Int = 10
     initial_T::Float64 = 1.1                 # Temptation payoff
     S::Float64 = -0.1                        # Sucker's payoff
-    initial_w::Float64 = 0.5
+    initial_w::Float16 = Float16(0.5)
     Δw::Float64 = 0.1
     interaction_freqency::Float64 = 1.0
     reproduction_rate::Float64 = 0.1
@@ -146,7 +144,7 @@ mutable struct Model
     # agent's parameters
     strategy_vec::Vector{Strategy}     # agents' strategy
     payoff_vec::Vector{Float64}        # agents' payoff
-    graph::SimpleWeightedGraph
+    weights::Matrix{Float16}
 
     function Model(param::Param)
         N_vec = get_N_vec(param)
@@ -166,7 +164,7 @@ mutable struct Model
             # agent's parameters
             fill(D, param.initial_N),
             fill(0.0, param.initial_N),
-            create_regular_weighted_graph(param.initial_N, param.initial_k, param.initial_w),
+            create_adjacency_matrix(param.initial_N, param.initial_k, param.initial_w),
         )
     end
 end
@@ -193,7 +191,7 @@ end
     - Otherwise, the weight is decreased by v.
 """
 function interaction!(model::Model)::Nothing
-    N = nv(model.graph)
+    N = nv(model.weights)
     interaction_N = round(Int, N * model.param.interaction_freqency)
     payoff_table = model.payoff_table_vec[model.generation]
 
@@ -202,9 +200,7 @@ function interaction!(model::Model)::Nothing
 
     for focal_id in focal_id_vec
         # Pick an opponent
-        opponent_vec = neighbors(model.graph, focal_id)
-        weights = get_weight.(Ref(model.graph), Ref(focal_id), opponent_vec)
-        opponent_id = sample(model.param.rng, opponent_vec, Weights(weights))
+        opponent_id = sample(model.param.rng, 1:N, Weights(model.weights[focal_id, :]))
 
         # strategy
         strategy_pair = (model.strategy_vec[focal_id], model.strategy_vec[opponent_id])
@@ -220,9 +216,9 @@ function interaction!(model::Model)::Nothing
 
     # graph
     for (focal_id, opponent_id, up) in update_weights
-        model.graph.weights[focal_id, opponent_id] *= (1.0 + model.param.Δw * (up ? +1.0 : -1.0))
-        model.graph.weights[focal_id, opponent_id] = min(model.graph.weights[focal_id, opponent_id], 1.0)
-        model.graph.weights[opponent_id, focal_id] = model.graph.weights[focal_id, opponent_id]
+        new_weight = model.weights[focal_id, opponent_id] * (1.0 + model.param.Δw * (up ? +1.0 : -1.0))
+        new_weight = clamp(new_weight, 0.0, 1.0)
+        update_weight!(model.weights, opponent_id, focal_id, Float16(new_weight))
     end
 
     return
@@ -233,7 +229,7 @@ classic_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 - δ + δ * payoff
 sigmoid_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 / (1.0 + exp(-δ * payoff))
 
 function pick_deaths(model::Model, rng::MersenneTwister)::Vector{Int}
-    N = nv(model.graph)
+    N = nv(model.weights)
     death_N = model.death_N_vec[model.generation]
     neg_fitness_vec = sigmoid_fitness.(-model.payoff_vec, model.param.δ)
     death_id_vec = sample(rng, 1:N, Weights(neg_fitness_vec), death_N, replace = false)
@@ -242,7 +238,7 @@ function pick_deaths(model::Model, rng::MersenneTwister)::Vector{Int}
 end
 
 function pick_parents(model::Model, rng::MersenneTwister)::Vector{Int}
-    N = nv(model.graph)
+    N = nv(model.weights)
     birth_N = model.birth_N_vec[model.generation]
     fitness_vec = sigmoid_fitness.(model.payoff_vec, model.param.δ)
     parent_id_vec = sample(rng, 1:N, Weights(fitness_vec), birth_N, replace = false)
@@ -259,14 +255,14 @@ function death!(model::Model, rng::MersenneTwister)::Vector{Int}
     death_id_vec = pick_deaths(model, rng)
     deleteat!(model.strategy_vec, death_id_vec)
     deleteat!(model.payoff_vec, death_id_vec)
-    rem_vertices!(model.graph, death_id_vec)
+    model.weights = rem_vertices(model.weights, death_id_vec)
 
     # connect orphan nodes to a random node if they exist.
-    N = nv(model.graph)
-    for orphan = 1:N
-        if isempty(neighbors(model.graph, orphan))
-            add_edge!(model.graph, orphan, rand(rng, setdiff(1:N, [orphan])), 1.0)
-        end
+    N = nv(model.weights)
+    orphan_vec = [i for i in 1:N if all(model.weights[i, :] .== 0)]
+    for orphan in orphan_vec
+        adoptive_parent = rand(rng, setdiff(1:N, [orphan]))
+        update_weight!(model.weights, orphan, adoptive_parent, Float16(1.0))
     end
 
     return death_id_vec
@@ -285,7 +281,7 @@ invert(s::Strategy)::Strategy = (s == C ? D : C)
 function birth!(model::Model, rng::MersenneTwister)::Vector{Int}
     parent_id_vec = pick_parents(model, rng)
     birth_N = length(parent_id_vec)
-    N = nv(model.graph)
+    N = nv(model.weights)
     child_id_vec = collect((N + 1):(N + birth_N))
 
     # strategy
@@ -298,25 +294,37 @@ function birth!(model::Model, rng::MersenneTwister)::Vector{Int}
     append!(model.payoff_vec, zeros(Float64, birth_N))
 
     # graph
-    add_vertices!(model.graph, birth_N)
+    ## add vertices
+    _new_weights = fill(Float16(0.0), (N + birth_N, N + birth_N))
+    @inbounds for x = 1:N
+        @simd for y = 1:N
+            _new_weights[x, y] = model.weights[x, y]
+        end
+    end
+    model.weights = _new_weights
+
+    ## inherit parent's connection
+    @inbounds for (parent_id, child_id) in zip(parent_id_vec, child_id_vec)
+        model.weights[child_id, :] = model.weights[:, child_id] = model.weights[parent_id, :]
+        update_weight!(model.weights, parent_id, child_id, Float16(1.0))
+        update_weight!(model.weights, child_id, child_id, Float16(0.0))
+    end
+
+    ## mutation
+    N = nv(model.weights)
     for (parent_id, child_id) in zip(parent_id_vec, child_id_vec)
-        ## inherit parent's connection
-        neighbor_vec = copy(neighbors(model.graph, parent_id))
-        for neighbor in neighbor_vec
-            weight = get_weight(model.graph, parent_id, neighbor)
-            if rand(rng) > model.μ_c_vec[model.generation]
-                add_edge!(model.graph, child_id, neighbor, weight)
-            else
+        neighbor_vec =
+            [neighbor_id for neighbor_id in 1:N if neighbor_id != parent_id && model.weights[child_id, neighbor_id] > 0]
+        for neighbor_id in neighbor_vec
+            if rand(rng) < model.μ_c_vec[model.generation]
                 alien_id = child_id
-                while alien_id == child_id
+                while alien_id in [child_id, neighbor_vec...]
                     alien_id = rand(rng, 1:N)
                 end
-                add_edge!(model.graph, child_id, alien_id, weight)
+                update_weight!(model.weights, child_id, alien_id, model.weights[child_id, neighbor_id])
+                rem_edge!(model.weights, child_id, neighbor_id)
             end
         end
-
-        ## connect parent and child
-        add_edge!(model.graph, parent_id, child_id, 1.0)
     end
 
     return parent_id_vec
@@ -367,7 +375,7 @@ function calc(g::SimpleGraph, model::Model)::Tuple{Float16,Float16,Float16,Float
     component_count = 0
     sum_component_size = 0.0
     max_component_size = 0.0
-    n = nv(g)
+    n = Graphs.nv(g)
 
     for component in connected_components(g)
         component_size = length(component)
@@ -404,7 +412,7 @@ std_component_size(components::Vector{Int})::Float16 = Float16(length(components
 function log!(output::DataFrame, model::Model, log_level::Int, log_row_n::Int)::Nothing
     output[log_row_n, 16:20] = [
         model.generation,
-        nv(model.graph),       # population
+        nv(model.weights),       # population
         model.payoff_table_vec[model.generation][(D, C)][1], # T
         mean(model.strategy_vec .== C),    # cooperation rate
         mean(model.payoff_vec),            # average payoff
@@ -413,9 +421,9 @@ function log!(output::DataFrame, model::Model, log_level::Int, log_row_n::Int)::
     log_level == 0 && return
 
     # 1st order connection
-    weak_connection_g = weighted_to_simple(model.graph, WEAK_THRESHOLD)  # costly
-    medium_connection_g = weighted_to_simple(model.graph, MEDIUM_THRESHOLD)  # costly
-    strong_connection_g = weighted_to_simple(model.graph, STRONG_THRESHOLD)  # costly
+    weak_connection_g = weights_to_network(model.weights, WEAK_THRESHOLD)  # costly
+    medium_connection_g = weights_to_network(model.weights, MEDIUM_THRESHOLD)  # costly
+    strong_connection_g = weights_to_network(model.weights, STRONG_THRESHOLD)  # costly
 
     # 平均次数, 平均クラスタ係数, コンポーネント数, 平均コンポーネントサイズ, 最大コンポーネントサイズ
     output[log_row_n, 21:25] = calc(weak_connection_g, model)
@@ -425,10 +433,10 @@ function log!(output::DataFrame, model::Model, log_level::Int, log_row_n::Int)::
     log_level <= 1 && return
 
     # 2nd order connection
-    second_order_weighted = weighted_to_2nd_order(model.graph)
-    weak_connection2_g = weighted_to_simple(second_order_weighted, WEAK_THRESHOLD)  # costly
-    medium_connection2_g = weighted_to_simple(second_order_weighted, MEDIUM_THRESHOLD)  # costly
-    strong_connection2_g = weighted_to_simple(second_order_weighted, STRONG_THRESHOLD)  # costly
+    second_order_weighted = convert_2nd_order(model.weights)
+    weak_connection2_g = weights_to_network(second_order_weighted, WEAK_THRESHOLD)  # costly
+    medium_connection2_g = weights_to_network(second_order_weighted, MEDIUM_THRESHOLD)  # costly
+    strong_connection2_g = weights_to_network(second_order_weighted, STRONG_THRESHOLD)  # costly
 
     # 平均次数, 平均クラスタ係数, コンポーネント数, 平均コンポーネントサイズ, 最大コンポーネントサイズ
     output[log_row_n, 36:40] = calc(weak_connection2_g, model)

@@ -7,10 +7,10 @@ include("./Simulation.jl")
 using .Simulation: Param, POPULATION, PAYOFF, run
 
 @kwdef struct ParamOptions
-    initial_N_vec = [10_000]
+    initial_N_vec = [1000]
     initial_k_vec = [100]
-    initial_T_vec = [1.15]   # 0.0:0.1:2.0, [0.9, 1.1]
-    S_vec = [-0.1]  # -1.0:0.1:1.0, [-0.1, 0.1]
+    initial_T_vec = 0.0:0.1:2.0   # 0.0:0.1:2.0, [0.9, 1.1]
+    S_vec = -1.0:0.1:1.0  # -1.0:0.1:1.0, [-0.1, 0.1]
     initial_w_vec = [0.2]
     Δw_vec = [0.1]
     interaction_freqency_vec = [1.0]
@@ -18,10 +18,10 @@ using .Simulation: Param, POPULATION, PAYOFF, run
     δ_vec = [1.0]
     initial_μ_s_vec = [0.01]
     initial_μ_c_vec = [0.01]
-    β_sigma_vec = vec([(β, sigma) for β = 0.0:0.1:1.0, sigma = 0.0:100.0:1000.0])
+    β_sigma_vec = [(0.0, 0.0)]  # vec([(β, sigma) for β = 0.0:0.1:1.0, sigma = 0.0:100.0:1000.0])
     generations_vec = [10_000]
     variability_mode = POPULATION
-    trials = 1
+    trials = 10
 end
 
 function to_vector(params::ParamOptions)::Vector{Param}
@@ -79,11 +79,13 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     const PARAM_OPTIONS = to_vector(ParamOptions())
     const DIR_NAME = "output/$(Dates.format(now(), "yyyymmdd_HHMMSS"))"
-    const LOG_LEVEL = 1
+    const LOG_LEVEL = 0
+    const LOG_RATE = 0.5
+    const LOG_SKIP = 10
 
     mkdir(DIR_NAME)
 
     Threads.@threads for i in eachindex(PARAM_OPTIONS)
-        write("$(DIR_NAME)/$(i).csv", Simulation.run(PARAM_OPTIONS[i], log_level = LOG_LEVEL))
+        write("$(DIR_NAME)/$(i).csv", Simulation.run(PARAM_OPTIONS[i], log_level = LOG_LEVEL, log_rate = LOG_RATE, log_skip = LOG_SKIP))
     end
 end

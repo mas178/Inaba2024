@@ -2,12 +2,17 @@ using Random: MersenneTwister
 using StatsBase
 
 using Graphs
-using SimpleWeightedGraphs
 
 using Test: @testset, @test
 
 include("../src/Simulation.jl")
 using .Simulation: Model, Param, C, D, POPULATION, PAYOFF, MUTATION
+include("../src/Network.jl")
+using .Network: nv, neighbors
+
+function degree(weights::Matrix{Float16})::Vector{Int}
+    return [count(x -> x > 0, weight_vec) for weight_vec in eachrow(weights)]
+end
 
 @testset "Model" begin
     @testset "default" begin
@@ -100,13 +105,13 @@ using .Simulation: Model, Param, C, D, POPULATION, PAYOFF, MUTATION
         @test population_m.payoff_vec == payoff_m.payoff_vec == mutation_m.payoff_vec == fill(0.0, 1_000)
 
         ## graph
-        @test nv(population_m.graph) == nv(payoff_m.graph) == nv(mutation_m.graph) == 1_000
-        @test degree(population_m.graph) == degree(payoff_m.graph) == degree(mutation_m.graph) == fill(10, 1_000)
+        @test nv(population_m.weights) == nv(payoff_m.weights) == nv(mutation_m.weights) == 1_000
+        @test degree(population_m.weights) == degree(payoff_m.weights) == degree(mutation_m.weights) == fill(10, 1_000)
         for x = 1:1_000
-            for y in neighbors(population_m.graph, x)
-                @test get_weight(population_m.graph, x, y) == 0.5
-                @test get_weight(payoff_m.graph, x, y) == 0.5
-                @test get_weight(mutation_m.graph, x, y) == 0.5
+            for y in neighbors(population_m.weights, x)
+                @test population_m.weights[x, y] == population_m.weights[y, x] == Float16(0.5)
+                @test payoff_m.weights[x, y] == payoff_m.weights[y, x] == Float16(0.5)
+                @test mutation_m.weights[x, y] == mutation_m.weights[y, x] == Float16(0.5)
             end
         end
     end
@@ -138,7 +143,7 @@ using .Simulation: Model, Param, C, D, POPULATION, PAYOFF, MUTATION
         @test population_m.param.initial_k == payoff_m.param.initial_k == mutation_m.param.initial_k == 100
         @test population_m.param.initial_T == payoff_m.param.initial_T == mutation_m.param.initial_T == 1.5
         @test population_m.param.S == payoff_m.param.S == mutation_m.param.S == 2.2
-        @test population_m.param.initial_w == payoff_m.param.initial_w == mutation_m.param.initial_w == 0.123
+        @test population_m.param.initial_w == payoff_m.param.initial_w == mutation_m.param.initial_w == Float16(0.123)
         @test population_m.param.Δw == payoff_m.param.Δw == mutation_m.param.Δw == 0.19
         @test population_m.param.interaction_freqency ==
               payoff_m.param.interaction_freqency ==
@@ -231,13 +236,13 @@ using .Simulation: Model, Param, C, D, POPULATION, PAYOFF, MUTATION
         @test population_m.payoff_vec == payoff_m.payoff_vec == mutation_m.payoff_vec == fill(0.0, 256)
 
         ## graph
-        @test nv(population_m.graph) == nv(payoff_m.graph) == nv(mutation_m.graph) == 256
-        @test degree(population_m.graph) == degree(payoff_m.graph) == degree(mutation_m.graph) == fill(100, 256)
+        @test nv(population_m.weights) == nv(payoff_m.weights) == nv(mutation_m.weights) == 256
+        @test degree(population_m.weights) == degree(payoff_m.weights) == degree(mutation_m.weights) == fill(100, 256)
         for x = 1:256
-            for y in neighbors(population_m.graph, x)
-                @test get_weight(population_m.graph, x, y) == 0.123
-                @test get_weight(payoff_m.graph, x, y) == 0.123
-                @test get_weight(mutation_m.graph, x, y) == 0.123
+            for y in neighbors(population_m.weights, x)
+                @test population_m.weights[x, y] == population_m.weights[y, x] == Float16(0.123)
+                @test payoff_m.weights[x, y] == payoff_m.weights[y, x] == Float16(0.123)
+                @test mutation_m.weights[x, y] == mutation_m.weights[y, x] == Float16(0.123)
             end
         end
     end

@@ -49,7 +49,7 @@ using .Simulation: Model, Param, POPULATION, PAYOFF, MUTATION, run
         @test df.initial_N == fill(100, 5)
         @test df.initial_T == fill(1.15, 5)
         @test df.S == fill(-0.1, 5)
-        @test df.initial_w == fill(0.2, 5)
+        @test df.initial_w == fill(Float16(0.2), 5)
         @test df.Δw == fill(0.1, 5)
         @test df.interaction_freqency == fill(1.0, 5)
         @test df.reproduction_rate == fill(0.05, 5)
@@ -80,64 +80,64 @@ using .Simulation: Model, Param, POPULATION, PAYOFF, MUTATION, run
 
         # 18 〜 20
         if param.variability_mode == PAYOFF
-            @test df.T == Float16[1.006, 1.2295, 1.108, 1.04, 1.111]
+            @test df.T == Float16[1.149, 1.294, 1.187, 1.205, 1.148]
         else
             @test df.T == fill(Float16(1.15), 5)
         end
 
         if param.variability_mode == POPULATION
-            @test df.cooperation_rate == Float16[0.4407, 0.553, 0.5913, 0.6636, 0.6196]
-            @test df.payoff_μ == Float16[0.647, 1.048, 1.296, 1.424, 0.9473]
+            @test df.cooperation_rate == Float16[0.3728, 0.3723, 0.344, 0.3655, 0.3186]
+            @test df.payoff_μ == Float16[0.6543, 0.6733, 0.8286, 0.7334, 0.493]
         elseif param.variability_mode == PAYOFF
-            @test df.cooperation_rate == Float16[0.53, 0.6, 0.62, 0.66, 0.65]
-            @test df.payoff_μ == Float16[1.135, 1.381, 1.307, 1.411, 1.256]
+            @test df.cooperation_rate == Float16[0.47, 0.39, 0.47, 0.45, 0.53]
+            @test df.payoff_μ == Float16[0.9985, 0.861, 1.011, 0.98, 1.108]
         elseif param.variability_mode == MUTATION
-            @test df.cooperation_rate == Float16[0.23, 0.32, 0.36, 0.4, 0.47]
-            @test df.payoff_μ == Float16[0.4395, 0.6963, 0.7764, 0.855, 1.08]
+            @test df.cooperation_rate == Float16[0.22, 0.28, 0.4, 0.51, 0.53]
+            @test df.payoff_μ == Float16[0.4666, 0.719, 0.871, 1.212, 1.084]
         end
 
         if param.variability_mode == POPULATION
             # 21 〜 25
-            @test df.weak_k1 == Float16[0.0, 10.32, 13.55, 16.66, 21.86]
-            @test df.weak_C1 == Float16[0.0, 0.3635, 0.329, 0.334, 0.3306]
-            @test df.weak_comp1_count == Float16[0.0, 1.0, 1.0, 1.0, 1.0]
-            @test df.weak_comp1_size_μ == Float16[0.0, 1.0, 1.0, 1.0, 1.0]
-            @test df.weak_comp1_size_max == Float16[0.0, 1.0, 1.0, 1.0, 1.0]
+            @test df.weak_k1 == Float16[0.0, 0.0, 0.0, 0.0, 0.0]
+            @test df.weak_C1 == Float16[0.0, 0.0, 0.0, 0.0, 0.0]
+            @test df.weak_comp1_count == Float16[0.0, 0.0, 0.0, 0.0, 0.0]
+            @test df.weak_comp1_size_μ == Float16[0.0, 0.0, 0.0, 0.0, 0.0]
+            @test df.weak_comp1_size_max == Float16[0.0, 0.0, 0.0, 0.0, 0.0]
 
             # 46 〜 50
-            @test df.strong_k2 == Float16[1.75, 1.333, 2.0, 1.714, 2.445]
-            @test df.strong_C2 == Float16[0.2917, 0.0, 0.5835, 0.0, 0.685]
-            @test df.strong_comp2_count == Float16[2.0, 1.0, 1.0, 1.0, 2.0]
-            @test df.strong_comp2_size_μ == Float16[0.0339, 0.03192, 0.043, 0.0673, 0.03983]
-            @test df.strong_comp2_size_max == Float16[0.0339, 0.03192, 0.043, 0.0673, 0.04425]
+            @test df.strong_k2 == Float16[0.0, 1.5, 2.834, 2.0, 0.0]
+            @test df.strong_C2 == Float16[0.0, 0.0, 0.4473, 0.5835, 0.0]
+            @test df.strong_comp2_count == Float16[0.0, 2.0, 1.0, 1.0, 0.0]
+            @test df.strong_comp2_size_μ == Float16[0.0, 0.04254, 0.129, 0.03845, 0.0]
+            @test df.strong_comp2_size_max == Float16[0.0, 0.0532, 0.129, 0.03845, 0.0]
         elseif param.variability_mode == PAYOFF
             # 21 〜 25
-            @test df.weak_k1 == Float16[14.18, 15.555, 19.22, 21.66, 23.95]
-            @test df.weak_C1 == Float16[0.4036, 0.4062, 0.3606, 0.3628, 0.3582]
-            @test df.weak_comp1_count == Float16[1.0, 1.0, 1.0, 1.0, 1.0]
-            @test df.weak_comp1_size_μ == Float16[0.99, 0.99, 1.0, 1.0, 1.0]
-            @test df.weak_comp1_size_max == Float16[0.99, 0.99, 1.0, 1.0, 1.0]
+            @test df.weak_k1 == Float16[8.9, 0.0, 0.0, 0.0, 14.46]
+            @test df.weak_C1 == Float16[0.3972, 0.0, 0.0, 0.0, 0.3762]
+            @test df.weak_comp1_count == Float16[1.0, 0.0, 0.0, 0.0, 1.0]
+            @test df.weak_comp1_size_μ == Float16[0.91, 0.0, 0.0, 0.0, 1.0]
+            @test df.weak_comp1_size_max == Float16[0.91, 0.0, 0.0, 0.0, 1.0]
 
             # 46 〜 50
-            @test df.strong_k2 == Float16[2.223, 4.266, 2.0, 1.75, 1.5]
-            @test df.strong_C2 == Float16[0.2328, 0.5225, 0.4333, 0.2917, 0.0]
-            @test df.strong_comp2_count == Float16[1.0, 1.0, 1.0, 2.0, 1.0]
-            @test df.strong_comp2_size_μ == Float16[0.09, 0.15, 0.05, 0.04, 0.04]
-            @test df.strong_comp2_size_max == Float16[0.09, 0.15, 0.05, 0.05, 0.04]
+            @test df.strong_k2 == Float16[3.143, 6.6, 2.0, 2.285, 2.0]
+            @test df.strong_C2 == Float16[0.601, 0.8584, 0.2167, 0.5713, 0.2142]
+            @test df.strong_comp2_count == Float16[2.0, 1.0, 1.0, 2.0, 1.0]
+            @test df.strong_comp2_size_μ == Float16[0.07, 0.1, 0.1, 0.035, 0.07]
+            @test df.strong_comp2_size_max == Float16[0.08, 0.1, 0.1, 0.04, 0.07]
         elseif param.variability_mode == MUTATION
             # 21 〜 25
-            @test df.weak_k1 == Float16[2.8, 0.0, 0.0, 0.0, 0.0]
-            @test df.weak_C1 == Float16[0.7, 0.0, 0.0, 0.0, 0.0]
-            @test df.weak_comp1_count == Float16[1.0, 0.0, 0.0, 0.0, 0.0]
-            @test df.weak_comp1_size_μ == Float16[0.05, 0.0, 0.0, 0.0, 0.0]
-            @test df.weak_comp1_size_max == Float16[0.05, 0.0, 0.0, 0.0, 0.0]
+            @test df.weak_k1 == Float16[0.0, 0.0, 0.0, 13.42, 16.66]
+            @test df.weak_C1 == Float16[0.0, 0.0, 0.0, 0.3335, 0.3667]
+            @test df.weak_comp1_count == Float16[0.0, 0.0, 0.0, 1.0, 1.0]
+            @test df.weak_comp1_size_μ == Float16[0.0, 0.0, 0.0, 1.0, 1.0]
+            @test df.weak_comp1_size_max == Float16[0.0, 0.0, 0.0, 1.0, 1.0]
 
             # 46 〜 50
-            @test df.strong_k2 == Float16[2.572, 3.334, 2.666, 3.6, 1.714]
-            @test df.strong_C2 == Float16[1.0, 0.6943, 0.757, 0.641, 0.0]
-            @test df.strong_comp2_count == Float16[2.0, 1.0, 1.0, 1.0, 1.0]
-            @test df.strong_comp2_size_μ == Float16[0.035, 0.06, 0.09, 0.15, 0.07]
-            @test df.strong_comp2_size_max == Float16[0.04, 0.06, 0.09, 0.15, 0.07]
+            @test df.strong_k2 == Float16[2.889, 2.0, 2.25, 2.8, 3.666]
+            @test df.strong_C2 == Float16[0.6743, 0.5835, 0.2917, 0.7, 0.567]
+            @test df.strong_comp2_count == Float16[1.0, 1.0, 1.0, 1.0, 1.0]
+            @test df.strong_comp2_size_μ == Float16[0.09, 0.04, 0.08, 0.05, 0.12]
+            @test df.strong_comp2_size_max == Float16[0.09, 0.04, 0.08, 0.05, 0.12]
         end
     end
 end
