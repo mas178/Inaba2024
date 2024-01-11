@@ -7,12 +7,26 @@ using DataFrames: DataFrame, select!, Not
 
 include("../src/Network.jl")
 using .Network:
-    nv, rem_vertices, update_weight!, rem_edge!, create_adjacency_matrix, weights_to_network, convert_2nd_order
+    nv,
+    rem_vertices,
+    update_weight!,
+    rem_edge!,
+    create_adjacency_matrix,
+    weights_to_network,
+    convert_2nd_order,
+    normalize_degree!,
+    normalize_weight!
 
-export Model, Param, C, D, POPULATION, PAYOFF, interaction!, death!, birth!, log!, run
+export Model,
+    Param, C, D, POPULATION, PAYOFF, STRATEGY_MUTATION, RELATIONSHIP_MUTATION, interaction!, death!, birth!, log!, run
 
-@enum VariabilityMode POPULATION PAYOFF MUTATION
-const VARIABILITY_MODE = Dict(POPULATION => "POPULATION", PAYOFF => "PAYOFF", MUTATION => "MUTATION")
+@enum VariabilityMode POPULATION PAYOFF STRATEGY_MUTATION RELATIONSHIP_MUTATION
+const VARIABILITY_MODE = Dict(
+    POPULATION => "POPULATION",
+    PAYOFF => "PAYOFF",
+    STRATEGY_MUTATION => "STRATEGY_MUTATION",
+    RELATIONSHIP_MUTATION => "RELATIONSHIP_MUTATION",
+)
 
 @enum Strategy C D
 
@@ -53,7 +67,7 @@ end
     reproduction_rate::Float64 = 0.1
     δ::Float64 = 0.01                        # strength of selection
     initial_μ_s::Float64 = 0.0               # mutation rate of strategy
-    initial_μ_c::Float64 = 0.0               # mutation rate of connection
+    initial_μ_r::Float64 = 0.0               # mutation rate of relationship
     β::Float64 = 0.1                         # environmental volatility (自己回帰係数)
     sigma::Float64 = 0.1                     # environmental volatility (std of white noise)
     generations::Int = 100                   # generations (Time steps)
@@ -61,8 +75,8 @@ end
     rng::MersenneTwister = MersenneTwister() # random seed
 end
 
-function get_N_vec(p::Param)::Vector{Int}
-    p.variability_mode == POPULATION || return fill(p.initial_N, p.generations + 1)
+function get_N_vec(p::Param, variable::Bool)::Vector{Int}
+    variable || return fill(p.initial_N, p.generations + 1)
 
     N_vec = ar1(p.β, p.sigma, Float64(p.initial_N), p.generations + 1, p.rng)
 
@@ -75,12 +89,12 @@ function get_N_vec(p::Param)::Vector{Int}
     return round.(Int, N_vec)
 end
 
-function get_death_birth_N_vec(p::Param, N_vec::Vector{Int})::Tuple{Vector{Int},Vector{Int}}
+function get_death_birth_N_vec(p::Param, N_vec::Vector{Int}, variable::Bool)::Tuple{Vector{Int},Vector{Int}}
     base_N = round(Int, p.initial_N * p.reproduction_rate)
     death_N_vec = fill(base_N, p.generations)
     birth_N_vec = fill(base_N, p.generations)
 
-    p.variability_mode == POPULATION || return death_N_vec, birth_N_vec
+    variable || return death_N_vec, birth_N_vec
 
     for i = 1:(p.generations)
         ΔN = N_vec[i + 1] - N_vec[i]
@@ -108,8 +122,8 @@ function get_death_birth_N_vec(p::Param, N_vec::Vector{Int})::Tuple{Vector{Int},
     return death_N_vec, birth_N_vec
 end
 
-function get_payoff_table_vec(p::Param)::Vector{Dict}
-    if p.variability_mode == PAYOFF
+function get_payoff_table_vec(p::Param, variable::Bool)::Vector{Dict}
+    if variable
         T_vec = ar1(p.β, p.sigma, p.initial_T, p.generations, p.rng)
         T_vec = clamp.(T_vec, 0.0, 2.0)
         return [Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, T), (D, C) => (T, p.S), (D, D) => (0.0, 0.0)) for T in T_vec]
@@ -120,8 +134,8 @@ function get_payoff_table_vec(p::Param)::Vector{Dict}
     end
 end
 
-function get_μ_vec(p::Param, initial_μ::Float64)::Vector{Float16}
-    if p.variability_mode == MUTATION
+function get_μ_vec(p::Param, initial_μ::Float64, variable::Bool)::Vector{Float16}
+    if variable
         μ_vec = ar1(p.β, p.sigma, initial_μ, p.generations, p.rng)
         μ_vec = clamp.(μ_vec, 0.0, 1.0)
         return Float16.(μ_vec)
@@ -139,7 +153,7 @@ mutable struct Model
     birth_N_vec::Vector{Int}
     payoff_table_vec::Vector{Dict{Tuple{Strategy,Strategy},Tuple{Float64,Float64}}}
     μ_s_vec::Vector{Float16}
-    μ_c_vec::Vector{Float16}
+    μ_r_vec::Vector{Float16}
 
     # agent's parameters
     strategy_vec::Vector{Strategy}     # agents' strategy
@@ -147,8 +161,8 @@ mutable struct Model
     weights::Matrix{Float16}
 
     function Model(param::Param)
-        N_vec = get_N_vec(param)
-        (death_N_vec, birth_N_vec) = get_death_birth_N_vec(param, N_vec)
+        N_vec = get_N_vec(param, param.variability_mode == POPULATION)
+        (death_N_vec, birth_N_vec) = get_death_birth_N_vec(param, N_vec, param.variability_mode == POPULATION)
 
         new(
             param,
@@ -157,9 +171,9 @@ mutable struct Model
             # environmental variables
             death_N_vec,
             birth_N_vec,
-            get_payoff_table_vec(param),
-            get_μ_vec(param, param.initial_μ_s),
-            get_μ_vec(param, param.initial_μ_c),
+            get_payoff_table_vec(param, param.variability_mode == PAYOFF),
+            get_μ_vec(param, param.initial_μ_s, param.variability_mode == STRATEGY_MUTATION),
+            get_μ_vec(param, param.initial_μ_r, param.variability_mode == RELATIONSHIP_MUTATION),
 
             # agent's parameters
             fill(D, param.initial_N),
@@ -316,7 +330,7 @@ function birth!(model::Model, rng::MersenneTwister)::Vector{Int}
         neighbor_vec =
             [neighbor_id for neighbor_id in 1:N if neighbor_id != parent_id && model.weights[child_id, neighbor_id] > 0]
         for neighbor_id in neighbor_vec
-            if rand(rng) < model.μ_c_vec[model.generation]
+            if rand(rng) < model.μ_r_vec[model.generation]
                 alien_id = child_id
                 while alien_id in [child_id, neighbor_vec...]
                     alien_id = rand(rng, 1:N)
@@ -462,6 +476,8 @@ function run(param::Param; log_level::Int = 0, log_rate::Float64 = 0.5, log_skip
         interaction!(model)
         death!(model, param.rng)
         birth!(model, param.rng)
+        normalize_degree!(model.weights, param.initial_k)
+        normalize_weight!(model.weights, Float64(param.initial_w) * param.initial_k * param.initial_N)
 
         if generation ∈ log_generations
             log!(output_df, model, log_level, log_row_n)

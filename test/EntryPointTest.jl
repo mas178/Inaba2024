@@ -20,7 +20,7 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
             reproduction_rate_vec = [0.05, 0.1],
             δ_vec = [0.1, 1.0],
             initial_μ_s_vec = [0.01, 0.0],
-            initial_μ_c_vec = [0.02, 0.1],
+            initial_μ_r_vec = [0.02, 0.1],
             β_sigma_vec = [(0.1, 10.0), (0.3, 20.0), (0.5, 30.0)],
             generations_vec = [10, 20],
             variability_mode = mode,
@@ -41,7 +41,7 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
         @test params[1].reproduction_rate == 0.05
         @test params[1].δ == 0.1
         @test params[1].initial_μ_s == 0.01
-        @test params[1].initial_μ_c == 0.02
+        @test params[1].initial_μ_r == 0.02
         @test params[1].β == 0.1
         @test params[1].sigma == 10.0
         @test params[1].generations == 10
@@ -57,7 +57,7 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
         @test params[124_416].reproduction_rate == 0.1
         @test params[124_416].δ == 1.0
         @test params[124_416].initial_μ_s == 0.0
-        @test params[124_416].initial_μ_c == 0.1
+        @test params[124_416].initial_μ_r == 0.1
         @test params[124_416].β == 0.5
         @test params[124_416].sigma == 30.0
         @test params[124_416].generations == 20

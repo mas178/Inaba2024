@@ -349,11 +349,11 @@ end
             end
         end
 
-        @testset "μ_c = 0.0, μ_s = 0.0" begin
+        @testset "μ_r = 0.0, μ_s = 0.0" begin
             # before
             model.generation = 1
             model.birth_N_vec[model.generation] = 3
-            model.μ_c_vec[model.generation] = 0.0
+            model.μ_r_vec[model.generation] = 0.0
             model.μ_s_vec[model.generation] = 0.0
             model.strategy_vec[[6, 61, 75]] .= C
 
@@ -380,12 +380,12 @@ end
             @test model.weights[75, _index] == model.weights[103, _index]
         end
 
-        @testset "μ_c = 0.5, μ_s = 0.5" begin
+        @testset "μ_r = 0.5, μ_s = 0.5" begin
             # before
             model.generation = 10
             model.birth_N_vec[model.generation] = 3
             model.μ_s_vec[model.generation] = 0.5
-            model.μ_c_vec[model.generation] = 0.5
+            model.μ_r_vec[model.generation] = 0.5
             model.strategy_vec[[6, 61, 75]] .= C
 
             # execution

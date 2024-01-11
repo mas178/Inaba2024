@@ -6,7 +6,7 @@ all: update format test profiling
 
 run:
 	@echo "\nRunning src/EntryPoint.jl\n"
-	nohup $(JULIA_CMD) --threads 8 src/EntryPoint.jl > log/run_all.log &
+	nohup $(JULIA_CMD) --threads 12 src/EntryPoint.jl > log/run_all.log &
 
 test: test_simulation test_output test_entry_point test_sim_plot
 

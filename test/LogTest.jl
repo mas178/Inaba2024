@@ -8,7 +8,7 @@ using Test: @testset, @test
 
 include("../src/Simulation.jl")
 include("../src/Network.jl")
-using .Simulation: Param, Model, C, D, MUTATION, make_output_df, log!
+using .Simulation: Param, Model, C, D, STRATEGY_MUTATION, make_output_df, log!
 using .Network: create_adjacency_matrix, rem_edge!, neighbors
 
 @testset "log!" begin
@@ -28,11 +28,11 @@ using .Network: create_adjacency_matrix, rem_edge!, neighbors
             reproduction_rate = 0.15,
             δ = 0.9,
             initial_μ_s = 0.123,
-            initial_μ_c = 0.234,
+            initial_μ_r = 0.234,
             β = 0.156,
             sigma = 10,
             generations = 11,
-            variability_mode = MUTATION,
+            variability_mode = STRATEGY_MUTATION,
         )
 
         start_gen = floor(Int, param.generations * (1 - log_rate)) + 1
@@ -63,7 +63,7 @@ using .Network: create_adjacency_matrix, rem_edge!, neighbors
         @test output[:, 12] == fill(0.156, 11)
         @test output[:, 13] == fill(10, 11)
         @test output[:, 14] == fill(11, 11)
-        @test output[:, 15] == fill("MUTATION", 11)
+        @test output[:, 15] == fill("STRATEGY_MUTATION", 11)
     end
 
     @testset "16:20" begin

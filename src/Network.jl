@@ -4,12 +4,22 @@ using Graphs
 using LinearAlgebra: Diagonal
 using SparseArrays
 
-function nv(weights::Matrix{Float16})::Int
-    return size(weights, 1)
+nv(weights::Matrix{Float16})::Int = size(weights, 1)
+
+function degree(weights::Matrix{Float16}, node::Int)::Int
+    counter = 0
+    @inbounds @simd for i = 1:size(weights, 2)
+        if weights[node, i] > 0
+            counter += 1
+        end
+    end
+    return counter
 end
 
+degree(weights::Matrix{Float16})::Vector{Int} = [degree(weights, node) for node = 1:nv(weights)]
+
 function neighbors(weights::Matrix{Float16}, node::Int)::Vector{Int}
-    return [neighbor_id for neighbor_id in 1:size(weights, 1) if weights[node, neighbor_id] > 0]
+    return filter(neighbor_id -> weights[node, neighbor_id] > 0, 1:size(weights, 1))
 end
 
 function rem_vertices(weights::Matrix{Float16}, rem_nodes::Vector{Int})::Matrix{Float16}
@@ -54,9 +64,30 @@ function create_adjacency_matrix(N::Int, k::Int, initial_weight::Float16)::Matri
     return adjacency_matrix
 end
 
-# function create_regular_weighted_graph(N::Int, k::Int, initial_weight::Union{Float64,Float16})::SimpleWeightedGraph
-#     return SimpleWeightedGraph(create_adjacency_matrix(N, k, initial_weight))
-# end
+function normalize_degree!(weights::Matrix{Float16}, k::Int)::Nothing
+    degree_cache = degree(weights)
+
+    @inbounds for n = 1:nv(weights)
+        if degree_cache[n] > k
+            for neighbor_id in sort(neighbors(weights, n), by = i -> weights[n, i])
+                if degree_cache[neighbor_id] > k
+                    rem_edge!(weights, n, neighbor_id)
+                    degree_cache[n] -= 1
+                    degree_cache[neighbor_id] -= 1
+                    degree_cache[n] <= k && break
+                end
+            end
+        end
+    end
+
+    return
+end
+
+function normalize_weight!(weights::Matrix{Float16}, std_weight_sum::Float64)::Nothing
+    factor = std_weight_sum / sum(Float64, weights)
+    weights .*= Float16(factor)
+    return
+end
 
 weights_to_network(weights::Matrix{Float16}, θ::Float64)::SimpleGraph = SimpleGraph(weights .> θ)
 
@@ -77,56 +108,4 @@ function convert_2nd_order(weights::Matrix{Float16})::Matrix{Float16}
 
     return second_order_weights
 end
-
-# function convert_2nd_order(weights::Matrix{Float16})::Matrix{Float16}
-#     # calc 2nd order weights
-#     second_order_weights = weights + weights * weights
-#     second_order_weights -= Diagonal(second_order_weights)
-
-#     # normalization
-#     second_order_weights ./= (maximum(second_order_weights) / maximum(weights))
-
-#     return second_order_weights
-# end
-
-# function add_vertices!(weights::Matrix{Float16}, birth_n:Int)::Nothing
-#     n = size(weights, 1)
-#     zeros_row = zeros(n, birth_n)
-#     zeros_col = zeros(birth_n, n + birth_n)
-#     new_weights = vcat(weights, zeros_row)
-#     new_weights = hcat(new_weights, zeros_col)
-#     weights .= new_weights
-#     return
-# end
-
-# function rem_vertices!(g::SimpleWeightedGraph, rem_nodes::Vector{Int})::Nothing
-#     n = nv(g)
-#     keep_index = setdiff(1:n, rem_nodes)
-#     g.weights = g.weights[keep_index, keep_index]
-#     return
-# end
-
-# function rem_vertices2(g::SimpleWeightedGraph, rem_nodes::Vector{Int})::SimpleWeightedGraph
-#     n = nv(g)
-#     keep_nodes = setdiff(1:n, rem_nodes)
-#     adjacency_matrix = zeros(Float16, length(keep_nodes), length(keep_nodes))
-
-#     for (x_index, x) in enumerate(keep_nodes)
-#         for (y_index, y) in enumerate(keep_nodes)
-#             if has_edge(g, x, y)
-#                 adjacency_matrix[x_index, y_index] = get_weight(g, x, y)
-#             end
-#         end
-#     end
-
-#     return SimpleWeightedGraph(adjacency_matrix)
-# end
-
-# function rem_vertices_slow!(g::SimpleWeightedGraph, rem_nodes::Vector{Int})::Nothing
-#     for v in sort(rem_nodes, rev = true)
-#         rem_vertex!(g, v)
-#     end
-
-#     return
-# end
 end

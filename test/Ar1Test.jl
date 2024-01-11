@@ -85,7 +85,7 @@ end
     β = 0.3
     sigma = 500
     theoretical_sigma = sqrt(sigma^2 / (1 - β^2))
-    N_vec = Simulation.get_N_vec(Simulation.Param(generations = gen, β = β, sigma = sigma, initial_N = init_N))
+    N_vec = Simulation.get_N_vec(Simulation.Param(generations = gen, β = β, sigma = sigma, initial_N = init_N), true)
     @test length(N_vec) == gen + 1
     @test N_vec[1] == init_N
     @test mean(N_vec) ≈ init_N atol = init_N * 0.1
@@ -93,15 +93,15 @@ end
     @test maximum(N_vec) ≤ init_N * 2
     @test minimum(N_vec) ≥ 3
 
-    param = Simulation.Param(variability_mode = Simulation.PAYOFF)
-    N_vec = Simulation.get_N_vec(param)
+    param = Simulation.Param()
+    N_vec = Simulation.get_N_vec(param, false)
     @test N_vec == fill(param.initial_N, param.generations + 1)
 end
 
 @testset "get_death_birth_N_vec" begin
     param = Simulation.Param(β = 0.9, sigma = 400, initial_N = 1000)
-    N_vec = Simulation.get_N_vec(param)
-    death_birth_N_vec = Simulation.get_death_birth_N_vec(param, N_vec)
+    N_vec = Simulation.get_N_vec(param, true)
+    death_birth_N_vec = Simulation.get_death_birth_N_vec(param, N_vec, true)
 
     for i = 1:(param.generations)
         @test N_vec[i + 1] == N_vec[i] - death_birth_N_vec[1][i] + death_birth_N_vec[2][i]
@@ -112,14 +112,14 @@ end
 
 @testset "get_payoff_table_vec" begin
     param = Simulation.Param(generations = 10)
-    payoff_table_vec = Simulation.get_payoff_table_vec(param)
+    payoff_table_vec = Simulation.get_payoff_table_vec(param, false)
     @test [pt[(C, C)] for pt in payoff_table_vec] == fill((1.0, 1.0), param.generations)
     @test [pt[(C, D)] for pt in payoff_table_vec] == fill((-0.1, 1.1), param.generations)
     @test [pt[(D, C)] for pt in payoff_table_vec] == fill((1.1, -0.1), param.generations)
     @test [pt[(D, D)] for pt in payoff_table_vec] == fill((0.0, 0.0), param.generations)
 
-    param = Simulation.Param(generations = 1000, variability_mode = Simulation.PAYOFF)
-    payoff_table_vec = Simulation.get_payoff_table_vec(param)
+    param = Simulation.Param(generations = 1000)
+    payoff_table_vec = Simulation.get_payoff_table_vec(param, true)
     @test [pt[(C, C)] for pt in payoff_table_vec] == fill((1.0, 1.0), param.generations)
     @test [pt[(C, D)][1] for pt in payoff_table_vec] ==
           [pt[(D, C)][2] for pt in payoff_table_vec] ==
@@ -137,38 +137,21 @@ end
 @testset "get_μ_s_vec" begin
     initila_μ = 0.01
     param = Simulation.Param(generations = 10)
-    @test Simulation.get_μ_vec(param, initila_μ) == fill(Float16(initila_μ), param.generations)
+    @test Simulation.get_μ_vec(param, initila_μ, false) == fill(Float16(initila_μ), param.generations)
 
-    param = Simulation.Param(
-        generations = 10,
-        sigma = 0.01,
-        β = 0.1,
-        rng = MersenneTwister(1),
-        variability_mode = Simulation.MUTATION,
-    )
-    μ_s_vec = Simulation.get_μ_vec(param, initila_μ)
+    param = Simulation.Param(generations = 10, sigma = 0.01, β = 0.1, rng = MersenneTwister(1))
+    μ_s_vec = Simulation.get_μ_vec(param, initila_μ, true)
     @test μ_s_vec[1] == Float16(initila_μ)
     @test maximum(μ_s_vec) <= 1.0
     @test minimum(μ_s_vec) >= 0.0
-    @test Simulation.get_μ_vec(param, initila_μ) ==
+    @test Simulation.get_μ_vec(param, initila_μ, true) ==
           Float16[0.01, 0.01431, 0.01627, 0.02026, 0.01562, 0.005337, 0.01362, 0.00986, 0.00305, 0.0]
 
-    param = Simulation.Param(
-        generations = 10,
-        sigma = 0.01,
-        β = 0.1,
-        rng = MersenneTwister(2),
-        variability_mode = Simulation.MUTATION,
-    )
-    @test Simulation.get_μ_vec(param, initila_μ) ==
+    param = Simulation.Param(generations = 10, sigma = 0.01, β = 0.1, rng = MersenneTwister(2))
+    @test Simulation.get_μ_vec(param, initila_μ, true) ==
           Float16[0.01, 0.0174, 0.003294, 0.003244, 0.0, 0.001452, 0.01471, 0.001855, 0.014366, 0.02292]
 
-    param = Simulation.Param(
-        generations = 10,
-        sigma = 0.1,
-        β = 0.5,
-        rng = MersenneTwister(3),
-        variability_mode = Simulation.MUTATION,
-    )
-    @test Simulation.get_μ_vec(param, initila_μ) == Float16[0.01, 0.1292, 0.0, 0.1213, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0921]
+    param = Simulation.Param(generations = 10, sigma = 0.1, β = 0.5, rng = MersenneTwister(3))
+    @test Simulation.get_μ_vec(param, initila_μ, true) ==
+          Float16[0.01, 0.1292, 0.0, 0.1213, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0921]
 end

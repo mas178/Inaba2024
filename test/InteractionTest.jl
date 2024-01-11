@@ -5,7 +5,8 @@ using StatsBase
 using Test: @testset, @test
 
 include("../src/Simulation.jl")
-using .Simulation: Model, Param, C, D, interaction!, POPULATION, PAYOFF, MUTATION, VARIABILITY_MODE
+using .Simulation:
+    Model, Param, C, D, interaction!, POPULATION, PAYOFF, STRATEGY_MUTATION, RELATIONSHIP_MUTATION, VARIABILITY_MODE
 
 @testset "C vs. C" begin
     for mode in keys(VARIABILITY_MODE)
@@ -107,16 +108,16 @@ end
             @test Vector(model.weights[7, 8:end]) == Float16[0.5, 0.55, 0.0]
             @test Vector(model.weights[8, 9:end]) == Float16[0.405, 0.5]
             @test Vector(model.weights[9, 10:end]) == Float16[0.45]
-        elseif mode == MUTATION
-            @test model.payoff_vec ≈ [1.8, 1.1, 2.0, 1.1, -0.1, 1.1, 0.9, 1.1, 0.8, 2.2]
-            @test Vector(model.weights[1, 2:end]) ≈ Float16[0.45, 0.605, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.45]
-            @test Vector(model.weights[2, 3:end]) == Float16[0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5]
-            @test Vector(model.weights[3, 4:end]) == Float16[0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0]
-            @test Vector(model.weights[4, 5:end]) == Float16[0.45, 0.45, 0.0, 0.0, 0.0, 0.0]
+        elseif mode ∈ [STRATEGY_MUTATION, RELATIONSHIP_MUTATION]
+            @test model.payoff_vec ≈ [1.0, 0.0, 3.0, 0.0, 2.0, 0.0, 1.0, 2.2, 0.7, 1.1]
+            @test Vector(model.weights[1, 2:end]) == Float16[0.5, 0.55, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5]
+            @test Vector(model.weights[2, 3:end]) == Float16[0.5, 0.45, 0.0, 0.0, 0.0, 0.0, 0.0, 0.45]
+            @test Vector(model.weights[3, 4:end]) == Float16[0.5, 0.605, 0.0, 0.0, 0.0, 0.0, 0.0]
+            @test Vector(model.weights[4, 5:end]) == Float16[0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
             @test Vector(model.weights[5, 6:end]) == Float16[0.5, 0.5, 0.0, 0.0, 0.0]
-            @test Vector(model.weights[6, 7:end]) == Float16[0.45, 0.5, 0.0, 0.0]
+            @test Vector(model.weights[6, 7:end]) == Float16[0.5, 0.45, 0.0, 0.0]
             @test Vector(model.weights[7, 8:end]) == Float16[0.5, 0.55, 0.0]
-            @test Vector(model.weights[8, 9:end]) == Float16[0.45, 0.5]
+            @test Vector(model.weights[8, 9:end]) == Float16[0.405, 0.5]
             @test Vector(model.weights[9, 10:end]) == Float16[0.45]
         end
     end
@@ -149,10 +150,11 @@ end
             @test model.weights[7, 8] == Float16(0.55)  # C-C
             @test model.weights[1, 9] == Float16(0.45)  # C-D
             @test model.weights[3, 5] == Float16(0.45)  # C-D
-        elseif mode == MUTATION
-            @test model.payoff_vec ≈ [-0.1, 0.0, 0.0, 1.1, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+        elseif mode ∈ [STRATEGY_MUTATION, RELATIONSHIP_MUTATION]
+            @test model.payoff_vec == [-0.1, 0.0, -0.1, 0.0, 1.1, 0.0, 1.0, 1.0, 1.1, 0.0]
             @test model.weights[7, 8] == Float16(0.55)  # C-C
-            @test model.weights[1, 4] == Float16(0.45)  # C-D
+            @test model.weights[1, 9] == Float16(0.45)  # C-D
+            @test model.weights[3, 5] == Float16(0.45)  # C-D
         end
     end
 end

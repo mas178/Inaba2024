@@ -4,22 +4,22 @@ using DataFrames: DataFrame
 using Random: MersenneTwister
 
 include("./Simulation.jl")
-using .Simulation: Param, POPULATION, PAYOFF, run
+using .Simulation: Param, POPULATION, PAYOFF, STRATEGY_MUTATION, RELATIONSHIP_MUTATION, run
 
 @kwdef struct ParamOptions
     initial_N_vec = [1000]
-    initial_k_vec = [100]
+    initial_k_vec = [100, 200]
     initial_T_vec = 0.0:0.1:2.0   # 0.0:0.1:2.0, [0.9, 1.1]
     S_vec = -1.0:0.1:1.0  # -1.0:0.1:1.0, [-0.1, 0.1]
-    initial_w_vec = [0.2]
-    Δw_vec = [0.1]
+    initial_w_vec = [0.5]
+    Δw_vec = [0.05, 0.1]
     interaction_freqency_vec = [1.0]
     reproduction_rate_vec = [0.05]
     δ_vec = [1.0]
     initial_μ_s_vec = [0.01]
-    initial_μ_c_vec = [0.01]
+    initial_μ_r_vec = [0.01]
     β_sigma_vec = [(0.0, 0.0)]  # vec([(β, sigma) for β = 0.0:0.1:1.0, sigma = 0.0:100.0:1000.0])
-    generations_vec = [10_000]
+    generations_vec = [5_000]
     variability_mode = POPULATION
     trials = 10
 end
@@ -38,7 +38,7 @@ function to_vector(params::ParamOptions)::Vector{Param}
             reproduction_rate in params.reproduction_rate_vec,
             δ in params.δ_vec,
             initial_μ_s in params.initial_μ_s_vec,
-            initial_μ_c in params.initial_μ_c_vec,
+            initial_μ_r in params.initial_μ_r_vec,
             β_sigma in params.β_sigma_vec,
             generations in params.generations_vec
 
@@ -55,7 +55,7 @@ function to_vector(params::ParamOptions)::Vector{Param}
                     reproduction_rate = reproduction_rate,
                     δ = δ,
                     initial_μ_s = initial_μ_s,
-                    initial_μ_c = initial_μ_c,
+                    initial_μ_r = initial_μ_r,
                     β = β_sigma[1],
                     sigma = β_sigma[2],
                     generations = generations,
@@ -86,6 +86,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
     mkdir(DIR_NAME)
 
     Threads.@threads for i in eachindex(PARAM_OPTIONS)
-        write("$(DIR_NAME)/$(i).csv", Simulation.run(PARAM_OPTIONS[i], log_level = LOG_LEVEL, log_rate = LOG_RATE, log_skip = LOG_SKIP))
+        write(
+            "$(DIR_NAME)/$(i).csv",
+            Simulation.run(PARAM_OPTIONS[i], log_level = LOG_LEVEL, log_rate = LOG_RATE, log_skip = LOG_SKIP),
+        )
     end
 end
