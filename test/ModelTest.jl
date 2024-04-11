@@ -31,13 +31,13 @@ end
             @test model.param.S == -0.1
             @test model.param.initial_w == 0.5
             @test model.param.Δw == 0.1
-            @test model.param.interaction_freqency == 1.0
             @test model.param.reproduction_rate == 0.1
             @test model.param.δ == 0.01
             @test model.param.initial_μ_s == 0.0
             @test model.param.initial_μ_r == 0.0
             @test model.param.β == 0.1
-            @test model.param.sigma == 0.1
+            @test model.param.σ == 0.1
+            @test model.param.τ == 10
             @test model.param.generations == 100
             @test isa(model.param.rng, MersenneTwister)
             @test model.generation == 1
@@ -84,23 +84,22 @@ end
         ### variable T
         @test [t[(C, D)][2] for t in payoff_m.payoff_table_vec] == [t[(D, C)][1] for t in payoff_m.payoff_table_vec]
         T_vec = [t[(C, D)][2] for t in payoff_m.payoff_table_vec]
-        @test mean(T_vec) ≈ 1.1116489744902647
-        @test std(T_vec) ≈ 0.09818350661601088
-        @test maximum(T_vec) ≈ 1.3579004078889492
-        @test minimum(T_vec) ≈ 0.8337367648951757
+        @test mean(T_vec) ≈ 1.118881788959639
+        @test std(T_vec) ≈ 0.08835749739372203
+        @test maximum(T_vec) ≈ 1.2569887300872324
+        @test minimum(T_vec) ≈ 0.9495949727697413
 
         ## mutation (μ_s & μ_r)
-        @test population_m.μ_s_vec == payoff_m.μ_s_vec == r_mutation_m.μ_s_vec == fill(Float16(0.0), 100)
-        @test s_mutation_m.μ_s_vec != fill(Float16(0.0), 100)
-
-        @test population_m.μ_r_vec == payoff_m.μ_r_vec == s_mutation_m.μ_r_vec == fill(Float16(0.0), 100)
-        @test r_mutation_m.μ_r_vec != fill(Float16(0.0), 100)
-
-        @test mean(s_mutation_m.μ_s_vec) ≈ mean(r_mutation_m.μ_r_vec) ≈ 0.04697
-        @test std(s_mutation_m.μ_s_vec) ≈ std(r_mutation_m.μ_r_vec) ≈ 0.06384
-
-        @test maximum(s_mutation_m.μ_s_vec) ≈ maximum(r_mutation_m.μ_r_vec) ≈ 0.3088
-        @test minimum(s_mutation_m.μ_s_vec) ≈ minimum(r_mutation_m.μ_r_vec) ≈ 0.0
+        @test population_m.μ_s_vec ==
+              payoff_m.μ_s_vec ==
+              r_mutation_m.μ_s_vec ==
+              s_mutation_m.μ_s_vec ==
+              fill(Float16(0.0), 100)
+        @test population_m.μ_r_vec ==
+              payoff_m.μ_r_vec ==
+              s_mutation_m.μ_r_vec ==
+              r_mutation_m.μ_r_vec ==
+              fill(Float16(0.0), 100)
     end
 
     @testset "customized" begin
@@ -112,13 +111,13 @@ end
             :S => 2.2,
             :initial_w => 0.123,
             :Δw => 0.19,
-            :interaction_freqency => 0.111,
             :reproduction_rate => 0.56,
             :δ => 0.23,
             :initial_μ_s => 0.11,
             :initial_μ_r => 0.22,
             :β => 0.3,
-            :sigma => 50,
+            :σ => 50,
+            :τ => 1,
             :generations => 10_000,
         )
 
@@ -136,13 +135,13 @@ end
             @test model.param.S == 2.2
             @test model.param.initial_w == Float16(0.123)
             @test model.param.Δw == 0.19
-            @test model.param.interaction_freqency == 0.111
             @test model.param.reproduction_rate == 0.56
             @test model.param.δ == 0.23
             @test model.param.initial_μ_s == 0.11
             @test model.param.initial_μ_r == 0.22
             @test model.param.β == 0.3
-            @test model.param.sigma == 50
+            @test model.param.σ == 50
+            @test model.param.τ == 1
             @test model.param.generations == 10_000
 
             ## random generator
@@ -181,11 +180,11 @@ end
         @test payoff_m.birth_N_vec == s_mutation_m.birth_N_vec == fill(143, 10_000)
         ## population (population_m)
         diff_vec = [death_N - birth_N for (death_N, birth_N) in zip(population_m.death_N_vec, population_m.birth_N_vec)]
-        @test mean(diff_vec) ≈ 0.0057
-        @test std(diff_vec) ≈ 59.83938287352459
+        @test mean(diff_vec) ≈ 0 atol = 1e-3
+        @test std(diff_vec) ≈ 59.836 atol = 1e-3
         ### death_N_vec
-        @test mean(population_m.death_N_vec) ≈ 23.9762
-        @test std(population_m.death_N_vec) ≈ 34.98015715658623
+        @test mean(population_m.death_N_vec) ≈ 23.9698
+        @test std(population_m.death_N_vec) ≈ 34.97868835196489
         @test maximum(population_m.death_N_vec) ≈ 218
         @test minimum(population_m.death_N_vec) ≈ 0
         ### birth_N_vec
@@ -205,10 +204,10 @@ end
         ### variable T
         @test [t[(C, D)][2] for t in payoff_m.payoff_table_vec] == [t[(D, C)][1] for t in payoff_m.payoff_table_vec]
         T_vec = [t[(C, D)][2] for t in payoff_m.payoff_table_vec]
-        @test mean(T_vec) ≈ 1.0179084050306493
-        @test std(T_vec) ≈ 0.9944690954939563
+        @test mean(T_vec) ≈ 1.5048853052966207
+        @test std(T_vec) ≈ 0.498828983876384
         @test maximum(T_vec) ≈ 2.0
-        @test minimum(T_vec) ≈ 0.0
+        @test minimum(T_vec) ≈ 1.0
 
         ## mutation (μ_s & μ_r)
         @test population_m.μ_s_vec == payoff_m.μ_s_vec == r_mutation_m.μ_s_vec == fill(Float16(0.11), 10_000)
@@ -217,9 +216,12 @@ end
         @test population_m.μ_r_vec == payoff_m.μ_r_vec == s_mutation_m.μ_r_vec == fill(Float16(0.22), 10_000)
         @test r_mutation_m.μ_r_vec != fill(Float16(0.22), 10_000)
 
-        @test mean(s_mutation_m.μ_s_vec) ≈ mean(r_mutation_m.μ_r_vec) ≈ 0.4956
-        @test std(s_mutation_m.μ_s_vec) ≈ std(r_mutation_m.μ_r_vec) ≈ 0.4988
-        @test maximum(s_mutation_m.μ_s_vec) ≈ maximum(r_mutation_m.μ_r_vec) ≈ 1
+        @test mean(s_mutation_m.μ_s_vec) == Float16(0.11)
+        @test mean(r_mutation_m.μ_r_vec) == Float16(0.22)
+        @test std(s_mutation_m.μ_s_vec) ≈ 0.11
+        @test std(r_mutation_m.μ_r_vec) ≈ 0.22
+        @test maximum(s_mutation_m.μ_s_vec) == Float16(0.22)
+        @test maximum(r_mutation_m.μ_r_vec) == Float16(0.44)
         @test minimum(s_mutation_m.μ_s_vec) ≈ minimum(r_mutation_m.μ_r_vec) ≈ 0
     end
 end

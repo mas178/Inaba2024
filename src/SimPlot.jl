@@ -3,8 +3,14 @@ module SimPlot
 using CSV
 using DataFrames: DataFrame, AbstractDataFrame, nrow, combine, groupby
 using Glob: glob
-using Plots: Plot, plot!, plot, heatmap, twinx, PlotMeasures
+using Plots: Plot, plot!, plot, heatmap, twinx, PlotMeasures, RGB, cgrad
 using StatsBase: mean
+
+COLOR_MAP = cgrad([
+    RGB(0xB3 / 255, 0x20 / 255, 0x34 / 255),  # red   #B32034
+    RGB(0xE3 / 255, 0xE3 / 255, 0xE3 / 255),  # white #E3E3E3
+    RGB(0x2D / 255, 0x57 / 255, 0x9A / 255),   # blue  #2D579A
+])
 
 function csv_to_df(dir_name_vec::Vector{String})::Vector{DataFrame}
     csv_file_names = []

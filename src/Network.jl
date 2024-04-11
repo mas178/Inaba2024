@@ -1,8 +1,9 @@
 module Network
 
 using Graphs
-using LinearAlgebra: Diagonal
+using LinearAlgebra: Diagonal, diagm
 using SparseArrays
+using StatsBase: mean
 
 nv(weights::Matrix{Float16})::Int = size(weights, 1)
 
@@ -23,11 +24,24 @@ function neighbors(weights::Matrix{Float16}, node::Int)::Vector{Int}
 end
 
 function rem_vertices(weights::Matrix{Float16}, rem_nodes::Vector{Int})::Matrix{Float16}
-    n = size(weights, 1)
-    keep = trues(n)
-    keep[rem_nodes] .= false
+    N = nv(weights)
+    keep = setdiff(1:N, rem_nodes)
 
     return weights[keep, keep]
+end
+
+function add_vertices(weights::Matrix{Float16}, n::Int)::Matrix{Float16}
+    N = size(weights, 1)
+    new_weights = Matrix{Float16}(undef, N + n, N + n)
+
+    new_weights[:, (N + 1):(N + n)] .= Float16(0.0)
+    new_weights[(N + 1):(N + n), :] .= Float16(0.0)
+
+    for x = 0:(N - 1)
+        copyto!(new_weights, x * (N + n) + 1, weights, x * N + 1, N)
+    end
+
+    return new_weights
 end
 
 function update_weight!(weights::Matrix{Float16}, x::Int, y::Int, weight::Float16)::Nothing
@@ -40,24 +54,23 @@ function rem_edge!(weights::Matrix{Float16}, x::Int, y::Int)::Nothing
     return
 end
 
-function check_N_k(N::Int, k::Int)::Nothing
-    if k >= N || k < 0 || N % 2 == 1 || k % 2 == 1
-        error("Invalid combination of N and k for a regular graph (N = $(N), k = $(k))")
-    end
-end
-
-function create_adjacency_matrix(N::Int, k::Int, initial_weight::Float16)::Matrix{Float16}
-    check_N_k(N, k)
+function create_adjacency_matrix(N::Int, k::Int, initial_w::Float16)::Matrix{Float16}
+    @assert N > k > 0 && (N % 2 == 0 || k % 2 == 0)
 
     adjacency_matrix = zeros(Float16, N, N)
-    neighbors = 1:(k ÷ 2)
 
-    for i = 1:N
-        # j = mod.(neighbors .+ i .- 1, N) .+ 1
-        # adjacency_matrix[i, j] .= adjacency_matrix[j, i] .= initial_weight
-        for offset in neighbors
-            j = mod(i + offset - 1, N) + 1
-            adjacency_matrix[i, j] = adjacency_matrix[j, i] = initial_weight
+    for y = 1:N
+        for offset = 1:(k ÷ 2)
+            x = mod(y + offset - 1, N) + 1
+            adjacency_matrix[y, x] = initial_w
+
+            x = mod(y - offset - 1, N) + 1
+            adjacency_matrix[y, x] = initial_w
+        end
+
+        if k % 2 == 1
+            x = mod(y + N ÷ 2 - 1, N) + 1
+            adjacency_matrix[y, x] = initial_w
         end
     end
 
@@ -83,9 +96,15 @@ function normalize_degree!(weights::Matrix{Float16}, k::Int)::Nothing
     return
 end
 
-function normalize_weight!(weights::Matrix{Float16}, std_weight_sum::Float64)::Nothing
-    factor = std_weight_sum / sum(Float64, weights)
-    weights .*= Float16(factor)
+"""
+    normalize_weight!(weights::Matrix{Float16}, initial_k::Int, initial_w::Float16)::Nothing
+
+Keep average weight `initial_w`.
+"""
+function normalize_weight!(weights::Matrix{Float16}, initial_k::Int, initial_w::Float16)::Nothing
+    N = nv(weights)
+    mean_w = sum(Float64, weights) / N / min(initial_k, N)
+    weights .*= (initial_w / Float16(mean_w))
     return
 end
 
@@ -107,5 +126,71 @@ function convert_2nd_order(weights::Matrix{Float16})::Matrix{Float16}
     second_order_weights ./= (maximum(second_order_weights) / maximum(weights))
 
     return second_order_weights
+end
+
+"""
+    local_wcc(weights::Matrix{Float16}, i::Int, N::Int, max_w::Float16)::Float64
+
+calculate local weighted clustering coefficient.
+"""
+function local_wcc(weights::Matrix{Float16}, i::Int, max_w::Float16)::Float64
+    max_w > 0 || return 0.0
+
+    numerator = 0.0
+    denominator = 0.0
+
+    i_neighbors = neighbors(weights, i)
+
+    for j in i_neighbors
+        w_ij = weights[i, j]
+        for h in i_neighbors
+            if j < h
+                w_ih = weights[i, h]
+                harmonic_mean = (1 / w_ij + 1 / w_ih) / 2
+                denominator += 2 / (harmonic_mean + 1 / max_w)
+
+                w_jh = weights[j, h]
+                if w_jh > 0
+                    numerator += 2 / (harmonic_mean + 1 / w_jh)
+                end
+            end
+        end
+    end
+
+    return denominator != 0 ? numerator / denominator : 0.0
+end
+
+function weighted_cc(weights::Matrix{Float16})::Vector{Float64}
+    N = nv(weights)
+    max_w = maximum(weights)
+
+    # wcc_vec = fill(0.0, N)
+    # 
+    # Threads.@threads for i = 1:N
+    #     wcc_vec[i] = local_wcc(weights, i, max_w)
+    # end
+    # 
+    # return wcc_vec
+
+    return [local_wcc(weights, i, max_w) for i = 1:N]
+end
+
+"""
+    global_wcc(weights::Matrix{Float16}, i::Int, N::Int, max_w::Float16)::Float64
+
+calculate global weighted clustering coefficient.
+"""
+function global_wcc(weights::Matrix{Float16})::Float64
+    nv(weights) < 3 && return 0.0
+    return mean(wcc(weights))
+end
+
+function weighted_degree(weights::Matrix{Float16})::Vector{Float64}
+    return vec(sum(Float64, weights, dims = 1))
+end
+
+function weighted_mean_degree(weights::Matrix{Float16})::Float64
+    nv(weights) < 2 && return 0.0
+    return mean(weighted_degree(weights))
 end
 end

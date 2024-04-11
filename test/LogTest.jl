@@ -24,13 +24,13 @@ using .Network: create_adjacency_matrix, rem_edge!, neighbors
             S = 0.2,
             initial_w = 0.43,
             Δw = 0.2,
-            interaction_freqency = 0.6,
             reproduction_rate = 0.15,
             δ = 0.9,
             initial_μ_s = 0.123,
             initial_μ_r = 0.234,
             β = 0.156,
-            sigma = 10,
+            σ = 10,
+            τ = 1,
             generations = 11,
             variability_mode = STRATEGY_MUTATION,
         )
@@ -55,13 +55,13 @@ using .Network: create_adjacency_matrix, rem_edge!, neighbors
         @test output[:, 4] == fill(0.2, 11)
         @test output[:, 5] == fill(Float16(0.43), 11)
         @test output[:, 6] == fill(0.2, 11)
-        @test output[:, 7] == fill(0.6, 11)
-        @test output[:, 8] == fill(0.15, 11)
-        @test output[:, 9] == fill(0.9, 11)
-        @test output[:, 10] == fill(0.123, 11)
-        @test output[:, 11] == fill(0.234, 11)
-        @test output[:, 12] == fill(0.156, 11)
-        @test output[:, 13] == fill(10, 11)
+        @test output[:, 7] == fill(0.15, 11)
+        @test output[:, 8] == fill(0.9, 11)
+        @test output[:, 9] == fill(0.123, 11)
+        @test output[:, 10] == fill(0.234, 11)
+        @test output[:, 11] == fill(0.156, 11)
+        @test output[:, 12] == fill(10, 11)
+        @test output[:, 13] == fill(1, 11)
         @test output[:, 14] == fill(11, 11)
         @test output[:, 15] == fill("STRATEGY_MUTATION", 11)
     end

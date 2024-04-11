@@ -8,17 +8,31 @@ using .Simulation: Simulation
 
 Profile.clear()
 param = Simulation.Param(
-    initial_N = 2000,
-    initial_k = 200,
+    initial_N = 1000,
+    initial_k = 999,
     initial_w = 0.2,
     δ = 1.0,
     β = 0.1,
-    sigma = 20.0,
+    σ = 20.0,
     generations = 200,
     variability_mode = Simulation.POPULATION,
 )
-Simulation.run(param, log_level = 2)  # 初回実行時のオーバーヘッドを避けることで、プロファイリングの正確性を向上させる
-@profview Simulation.run(param, log_level = 2)
+Simulation.fast_run(param)  # 初回実行時のオーバーヘッドを避けることで、プロファイリングの正確性を向上させる
+@profview Simulation.fast_run(param)
+
+# Profile.clear()
+# param = Simulation.Param(
+#     initial_N = 2000,
+#     initial_k = 200,
+#     initial_w = 0.2,
+#     δ = 1.0,
+#     β = 0.1,
+#     sigma = 20.0,
+#     generations = 200,
+#     variability_mode = Simulation.POPULATION,
+# )
+# Simulation.run(param, log_level = 2)  # 初回実行時のオーバーヘッドを避けることで、プロファイリングの正確性を向上させる
+# @profview Simulation.run(param, log_level = 2)
 
 # Profile.clear()
 # param = Simulation.Param(

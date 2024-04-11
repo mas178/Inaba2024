@@ -8,6 +8,7 @@ using DataFrames: DataFrame, select!, Not
 include("../src/Network.jl")
 using .Network:
     nv,
+    add_vertices,
     rem_vertices,
     update_weight!,
     rem_edge!,
@@ -16,9 +17,6 @@ using .Network:
     convert_2nd_order,
     normalize_degree!,
     normalize_weight!
-
-export Model,
-    Param, C, D, POPULATION, PAYOFF, STRATEGY_MUTATION, RELATIONSHIP_MUTATION, interaction!, death!, birth!, log!, run
 
 @enum VariabilityMode POPULATION PAYOFF STRATEGY_MUTATION RELATIONSHIP_MUTATION
 const VARIABILITY_MODE = Dict(
@@ -41,36 +39,42 @@ AR(1) Model to create environmental volatility.
 """
 function ar1(
     β::Float64,        # 自己回帰の係数。|β| < 1 の場合に平均回帰性を持つ。μ = α / (1 - β)
-    sigma::Float64,        # std of white noise
+    σ::Float64,        # std of white noise
+    τ::Int,            # time scale
     μ::Float64,        # expected average value
     T::Int,            # time steps
     rng::MersenneTwister,
 )::Vector{Float64}
-    x = Vector{Float64}(undef, T)
+    @assert T % τ == 0
+
+    t_max = T ÷ τ
+    x = Vector{Float64}(undef, t_max)
     x[1] = μ
     alpha = μ * (1 - β)    # 定数項。μから逆算する。
-    for t = 2:T
-        x[t] = alpha + β * x[t - 1] + sigma * randn(rng)
+    for t = 2:t_max
+        x[t] = alpha + β * x[t - 1] + σ * randn(rng)
     end
 
-    return x
+    return repeat(x, inner = τ)[1:T]
 end
+
+ev_determined(σ::Float64, τ::Int, μ::Float64, T::Int)::Vector{Float64} = [t % 2τ < τ ? -1 : 1 for t = 1:T] .* σ .+ μ
 
 @kwdef struct Param
     initial_N::Int = 1_000
     initial_k::Int = 10
-    initial_T::Float64 = 1.1                 # Temptation payoff
-    S::Float64 = -0.1                        # Sucker's payoff
+    initial_T::Float64 = 1.1    # Temptation payoff
+    S::Float64 = -0.1           # Sucker's payoff
     initial_w::Float16 = Float16(0.5)
     Δw::Float64 = 0.1
-    interaction_freqency::Float64 = 1.0
     reproduction_rate::Float64 = 0.1
-    δ::Float64 = 0.01                        # strength of selection
-    initial_μ_s::Float64 = 0.0               # mutation rate of strategy
-    initial_μ_r::Float64 = 0.0               # mutation rate of relationship
-    β::Float64 = 0.1                         # environmental volatility (自己回帰係数)
-    sigma::Float64 = 0.1                     # environmental volatility (std of white noise)
-    generations::Int = 100                   # generations (Time steps)
+    δ::Float64 = 0.01           # strength of selection
+    initial_μ_s::Float64 = 0.0  # mutation rate of strategy
+    initial_μ_r::Float64 = 0.0  # mutation rate of relationship
+    β::Float64 = 0.1            # environmental volatility (自己回帰係数)
+    σ::Float64 = 0.1            # environmental volatility (std of white noise)
+    τ::Int = 10                 # environmental volatility (time scale)
+    generations::Int = 100      # generations (Time steps)
     variability_mode::VariabilityMode = POPULATION
     rng::MersenneTwister = MersenneTwister() # random seed
 end
@@ -78,7 +82,8 @@ end
 function get_N_vec(p::Param, variable::Bool)::Vector{Int}
     variable || return fill(p.initial_N, p.generations + 1)
 
-    N_vec = ar1(p.β, p.sigma, Float64(p.initial_N), p.generations + 1, p.rng)
+    N_vec = ar1(p.β, p.σ, p.τ, Float64(p.initial_N), p.generations, p.rng)
+    push!(N_vec, N_vec[end])
 
     for i = 2:(p.generations + 1)
         lower_bound = max(p.initial_N / 10, N_vec[i - 1] / 2 + 1)
@@ -124,8 +129,8 @@ end
 
 function get_payoff_table_vec(p::Param, variable::Bool)::Vector{Dict}
     if variable
-        T_vec = ar1(p.β, p.sigma, p.initial_T, p.generations, p.rng)
-        T_vec = clamp.(T_vec, 0.0, 2.0)
+        T_vec = ar1(p.β, p.σ, p.τ, p.initial_T, p.generations, p.rng)
+        T_vec = clamp.(T_vec, p.initial_T - (2.0 - p.initial_T), 2.0)
         return [Dict((C, C) => (1.0, 1.0), (C, D) => (p.S, T), (D, C) => (T, p.S), (D, D) => (0.0, 0.0)) for T in T_vec]
     else
         payoff_table =
@@ -135,13 +140,11 @@ function get_payoff_table_vec(p::Param, variable::Bool)::Vector{Dict}
 end
 
 function get_μ_vec(p::Param, initial_μ::Float64, variable::Bool)::Vector{Float16}
-    if variable
-        μ_vec = ar1(p.β, p.sigma, initial_μ, p.generations, p.rng)
-        μ_vec = clamp.(μ_vec, 0.0, 1.0)
-        return Float16.(μ_vec)
-    else
-        return fill(Float16(initial_μ), p.generations)
-    end
+    variable || return fill(Float16(initial_μ), p.generations)
+
+    μ_vec = ar1(p.β, p.σ, p.τ, initial_μ, p.generations, p.rng)
+    μ_vec = clamp.(μ_vec, 0.0, initial_μ * 2)
+    return Float16.(μ_vec)
 end
 
 mutable struct Model
@@ -204,18 +207,14 @@ end
     - If C vs. C, the weight is increased by v (0.0 < v < 1.0).
     - Otherwise, the weight is decreased by v.
 """
-function interaction!(model::Model)::Nothing
+function interaction!(model::Model, rng::MersenneTwister)::Nothing
     N = nv(model.weights)
-    interaction_N = round(Int, N * model.param.interaction_freqency)
     payoff_table = model.payoff_table_vec[model.generation]
 
-    focal_id_vec = sample(model.param.rng, 1:N, interaction_N, replace = false)
-    update_weights = []
+    weights_vec = Weights.(eachcol(model.weights))
+    opponent_id_vec = sample.(Ref(rng), weights_vec)
 
-    for focal_id in focal_id_vec
-        # Pick an opponent
-        opponent_id = sample(model.param.rng, 1:N, Weights(model.weights[focal_id, :]))
-
+    for (focal_id, opponent_id) in zip(1:N, opponent_id_vec)
         # strategy
         strategy_pair = (model.strategy_vec[focal_id], model.strategy_vec[opponent_id])
 
@@ -225,14 +224,9 @@ function interaction!(model::Model)::Nothing
         model.payoff_vec[opponent_id] += opponent_payoff
 
         # graph
-        push!(update_weights, (focal_id, opponent_id, strategy_pair == (C, C)))
-    end
-
-    # graph
-    for (focal_id, opponent_id, up) in update_weights
-        new_weight = model.weights[focal_id, opponent_id] * (1.0 + model.param.Δw * (up ? +1.0 : -1.0))
-        new_weight = clamp(new_weight, 0.0, 1.0)
-        update_weight!(model.weights, opponent_id, focal_id, Float16(new_weight))
+        new_weight =
+            model.weights[focal_id, opponent_id] * (1.0 + model.param.Δw * (strategy_pair == (C, C) ? +1.0 : -1.0))
+        update_weight!(model.weights, focal_id, opponent_id, Float16(new_weight))
     end
 
     return
@@ -273,7 +267,8 @@ function death!(model::Model, rng::MersenneTwister)::Vector{Int}
 
     # connect orphan nodes to a random node if they exist.
     N = nv(model.weights)
-    orphan_vec = [i for i in 1:N if all(model.weights[i, :] .== 0)]
+    orphan_vec = findall(==(0), vec(sum(model.weights, dims = 1)))
+
     for orphan in orphan_vec
         adoptive_parent = rand(rng, setdiff(1:N, [orphan]))
         update_weight!(model.weights, orphan, adoptive_parent, Float16(1.0))
@@ -308,14 +303,7 @@ function birth!(model::Model, rng::MersenneTwister)::Vector{Int}
     append!(model.payoff_vec, zeros(Float64, birth_N))
 
     # graph
-    ## add vertices
-    _new_weights = fill(Float16(0.0), (N + birth_N, N + birth_N))
-    @inbounds for x = 1:N
-        @simd for y = 1:N
-            _new_weights[x, y] = model.weights[x, y]
-        end
-    end
-    model.weights = _new_weights
+    model.weights = add_vertices(model.weights, birth_N)
 
     ## inherit parent's connection
     @inbounds for (parent_id, child_id) in zip(parent_id_vec, child_id_vec)
@@ -460,24 +448,51 @@ function log!(output::DataFrame, model::Model, log_level::Int, log_row_n::Int)::
     return
 end
 
-function run(param::Param; log_level::Int = 0, log_rate::Float64 = 0.5, log_skip::Int = 10)::DataFrame
+function fast_run(param::Param; log_rate::Float64 = 0.2, log_skip::Int = 10)::Float64
     model = Model(param)
-
-    start_gen = floor(Int, param.generations * (1 - log_rate)) + 1
-    log_generations = filter(x -> x % log_skip == 0, start_gen:(param.generations))
+    start_gen = floor(Int, model.param.generations * (1 - log_rate)) + 1
+    log_generations = filter(x -> x % log_skip == 0, start_gen:(model.param.generations))
     log_row_n = 1
 
-    output_df = make_output_df(param, log_level, length(log_generations))
+    c_rate_vec = fill(0.0, length(log_generations))
 
-    for generation = 1:(param.generations)
+    for generation = 1:(model.param.generations)
         model.generation = generation
         model.payoff_vec .= 0.0
 
-        interaction!(model)
-        death!(model, param.rng)
-        birth!(model, param.rng)
-        normalize_degree!(model.weights, param.initial_k)
-        normalize_weight!(model.weights, Float64(param.initial_w) * param.initial_k * param.initial_N)
+        interaction!(model, model.param.rng)
+        death!(model, model.param.rng)
+        birth!(model, model.param.rng)
+
+        # normalize_degree!(model.weights, model.param.initial_k)
+        normalize_weight!(model.weights, model.param.initial_k, model.param.initial_w)
+
+        if generation ∈ log_generations
+            c_rate_vec[log_row_n] = mean(model.strategy_vec .== C)
+            log_row_n += 1
+        end
+    end
+
+    return round(mean(c_rate_vec), digits = 5)
+end
+
+function run(model::Model; log_level::Int = 0, log_rate::Float64 = 0.5, log_skip::Int = 10)::DataFrame
+    start_gen = floor(Int, model.param.generations * (1 - log_rate)) + 1
+    log_generations = filter(x -> x % log_skip == 0, start_gen:(model.param.generations))
+    log_row_n = 1
+
+    output_df = make_output_df(model.param, log_level, length(log_generations))
+
+    for generation = 1:(model.param.generations)
+        model.generation = generation
+        model.payoff_vec .= 0.0
+
+        interaction!(model, model.param.rng)
+        death!(model, model.param.rng)
+        birth!(model, model.param.rng)
+
+        # normalize_degree!(model.weights, model.param.initial_k)
+        normalize_weight!(model.weights, model.param.initial_k, model.param.initial_w)
 
         if generation ∈ log_generations
             log!(output_df, model, log_level, log_row_n)
@@ -486,6 +501,10 @@ function run(param::Param; log_level::Int = 0, log_rate::Float64 = 0.5, log_skip
     end
 
     return output_df
+end
+
+function run(param::Param; log_level::Int = 0, log_rate::Float64 = 0.5, log_skip::Int = 10)::DataFrame
+    return run(Model(param), log_level = log_level, log_rate = log_rate, log_skip = log_skip)
 end
 
 end  # end of module

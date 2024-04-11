@@ -16,12 +16,12 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
             S_vec = [0.3, 0.35, 0.4],
             initial_w_vec = [0.21, 0.6],
             Δw_vec = [0.1, 0.11, 0.12],
-            interaction_freqency_vec = [0.31, 0.8],
             reproduction_rate_vec = [0.05, 0.1],
             δ_vec = [0.1, 1.0],
             initial_μ_s_vec = [0.01, 0.0],
             initial_μ_r_vec = [0.02, 0.1],
-            β_sigma_vec = [(0.1, 10.0), (0.3, 20.0), (0.5, 30.0)],
+            β_σ_vec = [(0.1, 10.0), (0.3, 20.0), (0.5, 30.0)],
+            τ_vec = [2, 5],
             generations_vec = [10, 20],
             variability_mode = mode,
             trials = 3,
@@ -37,13 +37,13 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
         @test params[1].S == 0.3
         @test params[1].initial_w == Float16(0.21)
         @test params[1].Δw == 0.1
-        @test params[1].interaction_freqency == 0.31
         @test params[1].reproduction_rate == 0.05
         @test params[1].δ == 0.1
         @test params[1].initial_μ_s == 0.01
         @test params[1].initial_μ_r == 0.02
         @test params[1].β == 0.1
-        @test params[1].sigma == 10.0
+        @test params[1].σ == 10.0
+        @test params[1].τ == 2
         @test params[1].generations == 10
         @test params[1].variability_mode == mode
 
@@ -53,13 +53,13 @@ using .EntryPoint: ParamOptions, to_vector, Simulation
         @test params[124_416].S == 0.4
         @test params[124_416].initial_w == Float16(0.6)
         @test params[124_416].Δw == 0.12
-        @test params[124_416].interaction_freqency == 0.8
         @test params[124_416].reproduction_rate == 0.1
         @test params[124_416].δ == 1.0
         @test params[124_416].initial_μ_s == 0.0
         @test params[124_416].initial_μ_r == 0.1
         @test params[124_416].β == 0.5
-        @test params[124_416].sigma == 30.0
+        @test params[124_416].σ == 30.0
+        @test params[124_416].τ == 5
         @test params[124_416].generations == 20
         @test params[124_416].variability_mode == mode
 

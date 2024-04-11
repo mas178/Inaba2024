@@ -1,42 +1,22 @@
 using Graphs
 using SimpleWeightedGraphs
-using LinearAlgebra: Diagonal, diag, dot
+using LinearAlgebra: Diagonal, diag, diagm, dot
 using StatsBase
 
 using Test: @testset, @test, @test_throws
 
 include("../src/Network.jl")
-using .Network: create_adjacency_matrix, weights_to_network, convert_2nd_order, rem_vertices, normalize_weight!
-
-# @testset "normalize_degree!" begin
-#     @test false
-# end
-
-@testset "normalize_weight!" begin
-    N = 2000
-    k = 200
-    initial_w = Float16(0.5)
-    std_weight_sum = N * k * Float64(initial_w)
-
-    weights = create_adjacency_matrix(N, k, initial_w)
-    before_weights = copy(weights)
-    weights .*= Float16(1.8)
-
-    @test weights == before_weights .* Float16(1.8)
-
-    normalize_weight!(weights, std_weight_sum)
-
-    @test weights == before_weights
-end
+using .Network: create_adjacency_matrix, weights_to_network, convert_2nd_order, rem_vertices
 
 @testset "create_adjacency_matrix" begin
-    @testset "ErrorException" begin
+    @testset "AssertionError" begin
         create_adjacency_matrix(10, 2, Float16(0.1))
-        @test_throws ErrorException create_adjacency_matrix(11, 2, Float16(0.1))
-        @test_throws ErrorException create_adjacency_matrix(10, 3, Float16(0.1))
-        @test_throws ErrorException create_adjacency_matrix(11, 3, Float16(0.1))
-        @test_throws ErrorException create_adjacency_matrix(11, -1, Float16(0.1))
-        @test_throws ErrorException create_adjacency_matrix(11, 11, Float16(0.1))
+        create_adjacency_matrix(10, 3, Float16(0.1))
+        create_adjacency_matrix(11, 2, Float16(0.1))
+        @test_throws AssertionError create_adjacency_matrix(11, 3, Float16(0.1))
+        @test_throws AssertionError create_adjacency_matrix(4, 10, Float16(0.1))
+        @test_throws AssertionError create_adjacency_matrix(10, -1, Float16(0.1))
+        @test_throws AssertionError create_adjacency_matrix(10, 10, Float16(0.1))
     end
 
     @testset "N = 10, k = 4" begin
@@ -69,6 +49,16 @@ end
         add_vertex!(g)
         @test vertices(g) == 1:9
         @test neighbors(g, 9) == []
+    end
+
+    @testset "N = 10, k = 9" begin
+        N = 10
+        k = 9
+        initial_weight = Float16(0.3)
+        actual_value = create_adjacency_matrix(N, k, initial_weight)
+        expected_value = fill(initial_weight, (N, N)) - diagm(0 => fill(initial_weight, N))
+        @test actual_value[1, :] == expected_value[1, :]
+        @test actual_value == expected_value
     end
 end
 

@@ -26,11 +26,11 @@ test_simulation:
 	@echo "\nRunning test/DeathBirthTest.jl\n"
 	$(JULIA_CMD) test/DeathBirthTest.jl
 
-	@echo "\nRunning test/RunTest.jl\n"
-	$(JULIA_CMD) test/RunTest.jl
-
 	@echo "\nRunning test/LogTest.jl\n"
 	$(JULIA_CMD) test/LogTest.jl
+
+	@echo "\nRunning test/RunTest.jl\n"
+	$(JULIA_CMD) test/RunTest.jl
 
 test_entry_point:
 	@echo "\nRunning test/EntryPointTest.jl\n"
