@@ -5,7 +5,21 @@ using LinearAlgebra: Diagonal, diagm
 using SparseArrays
 using StatsBase: mean
 
+export nv, ne, degree, neighbors, rem_vertices, add_vertices, update_weight!, rem_edge!, create_adjacency_matrix
+
 nv(weights::Matrix{Float16})::Int = size(weights, 1)
+
+function ne(weights::Matrix{Float16})::Int
+    @assert count(weights .> 0) % 2 == 0 "$(weights)"
+
+    try
+        return count(weights .> 0) / 2
+    catch
+        @show count(weights .> 0)
+        @show weights
+        throw(e)
+    end
+end
 
 function degree(weights::Matrix{Float16}, node::Int)::Int
     counter = 0
