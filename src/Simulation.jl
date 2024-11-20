@@ -1,270 +1,330 @@
 module Simulation
 
+using Graphs
+using Parameters
 using Random: MersenneTwister
-using StatsBase: mean, std, sample, Weights
+using StatsBase: shuffle, Weights, sample, mean, std
+
+include("../src/EnvironmentalVariability.jl")
+using .EnvironmentalVariability: ar1
 
 include("../src/Network.jl")
-using .Network
-
-export Param, Model, C, D, cooperation_rate, run_one_step!, run
+using .Network: create_weighted_cycle_graph, mat_ne, mat_update_weight!, mat_degree, average_distance
 
 @enum Strategy C D
 
-const PayoffTable = Dict{Tuple{Strategy, Strategy}, Tuple{Float64, Float64}}
+@with_kw struct Param
+    # Spatial Structure
+    N::Int = 100       # population
+    k₀::Int = 4        # initial degree
+    w₀::Float64 = 1.0  # initial weight
 
-const RunOutput = Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    # Interaction
+    C_rate₀::Float64 = 0.5     # initial cooperator(C)'s freqtrialscy
+    b::Float64 = 1.25          # benefit to defect
+    relationship_increment_factor::Float64 = 1.1
 
-@kwdef struct Param
-    k₁::Int = 10
-    w₁::Float16 = Float16(0.5)
-    Δw::Float64 = 0.3
-    reproduction_rate::Float64 = 0.05
-    δ::Float64 = 1.0     # strength of selection
-    μ::Float64 = 0.01    # mutation rate of strategy
-    t_max::Int = 100     # Time steps
-    trial_max::Int = 10  # Trial count
-    rng::MersenneTwister = MersenneTwister() # random seed
+    # Environmental Variability
+    peak_node_resource::Float64  = 1.0
+    resource_decrement_factor::Float64 = 0.02
+    peak_node_variability::Int = 1   # Movable range of prime node (EVMode: PEAK_NODE, BOTH)
+    resource_limit_μ::Float64 = 0.5  # expected value of resource limit
+    resource_limit_β::Float64 = 0.1  # Autoregressive coefficient of resource limit
+    resource_limit_σ::Float64 = 0.1  # SD of white noise of resource limit
+
+    # Imitation
+    δ::Float64 = 0.99  # selection pressure
+    μ::Float64 = 0.01  # mutation rate
+
+    # Misc
+    generations::Int = 2_000  # time steps
+    trials::Int = 10          # trial count
 end
 
 mutable struct Model
-    t::Int
-    param::Param
-
-    # environmental variables
-    N_vec::Vector{Int}
-    payoff_table_vec::Vector{PayoffTable}
+    # model's parameters
+    p::Param
+    t::Int          # time step
+    peak_node::Int  # node which has the greatest resource
+    resource_limit_vec::Vector{Float64}
 
     # agent's parameters
     strategy_vec::Vector{Strategy}  # agents' strategy
-    payoff_vec::Vector{Float64}     # agents' payoff
-    weights::Matrix{Float16}        # agents' relationship
+    resource_vec::Vector{Float64}   # agents' resource
+    relation_mat::Matrix{Float64}
 
-    function Model(param::Param, N_vec::Vector{Int}, payoff_table_vec::Vector{PayoffTable})
-        N₁ = N_vec[1]
+    function Model(p::Param, rng::MersenneTwister)
+        resource_limit_vec = ar1(p.resource_limit_μ, p.resource_limit_β, p.resource_limit_σ, p.generations, rng)
 
-        new(
-            1,  # Time step
-            param,
-            N_vec,
-            payoff_table_vec,
+        C_count = round(Int, p.N * p.C_rate₀)
+        strategy_vec = shuffle(rng, [fill(C, C_count); fill(D, p.N - C_count)])
 
-            # agent's parameters
-            rand(param.rng, [C, D], N₁),
-            fill(0.0, N₁),
-            create_adjacency_matrix(N₁, param.k₁, param.w₁),
-        )
+        resource_vec = fill(0.0, p.N)
+
+        relation_mat = create_weighted_cycle_graph(p.N, p.k₀, p.w₀)
+
+        return new(p, 1, 1, resource_limit_vec, strategy_vec, resource_vec, relation_mat)
     end
 end
 
-function interaction!(model::Model, rng::MersenneTwister)::Nothing
-    N = model.N_vec[model.t]
-    payoff_table = model.payoff_table_vec[model.t]
-
-    weights_vec = Weights.(eachcol(model.weights))
-    opponent_id_vec = sample.(Ref(rng), weights_vec)
-
-    for (focal_id, opponent_id) in zip(1:N, opponent_id_vec)
-        # strategy
-        strategy_pair = (model.strategy_vec[focal_id], model.strategy_vec[opponent_id])
-
-        # payoff
-        focal_payoff, opponent_payoff = payoff_table[strategy_pair]
-        model.payoff_vec[focal_id] += focal_payoff
-        model.payoff_vec[opponent_id] += opponent_payoff
-
-        # graph
-        new_weight =
-            model.weights[focal_id, opponent_id] * (1.0 + model.param.Δw * (strategy_pair == (C, C) ? +1.0 : -1.0))
-        update_weight!(model.weights, focal_id, opponent_id, Float16(clamp(new_weight, 0.0, 1.0)))
-    end
-
-    return
-end
-
-sigmoid_fitness(payoff::Float64, δ::Float64)::Float64 = 1.0 / (1.0 + exp(-δ * payoff))
-
-function pick_agents(model::Model, n::Int, method::Symbol, rng::MersenneTwister)::Vector{Int}
-    fitness_vec = if method == :payoff_positive
-        sigmoid_fitness.(model.payoff_vec, model.param.δ)
-    elseif method == :payoff_negative
-        sigmoid_fitness.(-model.payoff_vec, model.param.δ)
-    elseif method == :degree
-        degree(model.weights)
-    elseif method == :weight
-        vec(sum(model.weights, dims = 1))
+function run!(m::Model, rng::MersenneTwister, log_level::Symbol = :default)::Union{Tuple, Vector}
+    if log_level == :full
+        model_vec = []
+    elseif log_level == :C_rate_only
+        C_rate_vec = fill(0.0, m.p.generations)
     else
-        error("Invalid method: $method. Use :payoff_positive, :payoff_negative, :degree, or :weight.")
+        C_rate_vec = fill(0.0, m.p.generations)
+        average_resource_vec = fill(0.0, m.p.generations)
+        death_count_vec = fill(0, m.p.generations)
+        peak_node_vec = fill(0, m.p.generations)
+        strategy_mat = fill(C, m.p.generations, m.p.N)
+        degree_mat = fill(0, m.p.generations, m.p.N)
+        average_distance_vec = fill(0.0, m.p.generations)
+        clustering_coefficient_vec = fill(0.0, m.p.generations)
+        average_C_neighbour_rate_vec = fill(0.0, m.p.generations)
     end
 
-    N = length(fitness_vec)
-    count(fitness_vec .> 0) <= n && return filter(x -> fitness_vec[x] > 0, 1:N)
-    agent_id_vec = sample(rng, 1:N, Weights(fitness_vec), n, replace = false)
+    for generation in 1:m.p.generations
+        m.t = generation
+        resource_allocation!(m, rng)
+        weighted_interaction!(m, rng)
+        death_id_vec, _ = weighted_death_birth!(m, rng)
 
-    return sort(agent_id_vec)
-end
-
-invert(s::Strategy)::Strategy = (s == C ? D : C)
-
-function get_n_death_birth(model::Model)::Tuple{Int, Int}
-    n_death = n_birth = round(Int, model.N_vec[model.t] * model.param.reproduction_rate)
-    n_growth = model.N_vec[model.t + 1] - model.N_vec[model.t]
-
-    if n_growth > 0
-        n_birth += n_growth
-    elseif n_growth < 0
-        n_death += abs(n_growth)
+        # Log
+        if log_level == :full
+            push!(model_vec, deepcopy(m))
+        elseif log_level == :C_rate_only
+            C_rate_vec[generation] = C_rate(m)
+        else
+            C_rate_vec[generation] = C_rate(m)
+            average_resource_vec[generation] = average_resource(m)
+            death_count_vec[generation] = length(death_id_vec)
+            peak_node_vec[generation] = m.peak_node
+            strategy_mat[generation, :] .= m.strategy_vec
+            degree_mat[generation, :] .= mat_degree(m.relation_mat)
+            
+            g = SimpleGraph(m.relation_mat)
+            average_distance_vec[generation] = average_distance(g)
+            clustering_coefficient_vec[generation] = global_clustering_coefficient(g)
+            average_C_neighbour_rate_vec[generation] = average_C_neighbour_rate(m.relation_mat, m.strategy_vec)
+        end
     end
 
-    return n_death, n_birth
+    if log_level == :full
+        return model_vec
+    elseif log_level == :C_rate_only
+        return C_rate_vec
+    else
+        return C_rate_vec, average_resource_vec, death_count_vec, peak_node_vec, strategy_mat, degree_mat, average_distance_vec, clustering_coefficient_vec, average_C_neighbour_rate_vec
+    end
 end
 
-function death!(model::Model, n_death::Int, rng::MersenneTwister)::Vector{Int}
-    death_id_vec = pick_agents(model, n_death, :payoff_negative, rng)
+function run_simple!(m::Model, rng::MersenneTwister)::Vector{Float64}
+    C_rate_vec = []
 
-    deleteat!(model.strategy_vec, death_id_vec)
-    deleteat!(model.payoff_vec, death_id_vec)
-    model.weights = rem_vertices(model.weights, death_id_vec)
+    for generation in 1:m.p.generations
+        m.t = generation
+        resource_allocation!(m, rng)
+        # weighted_interaction!(m, rng)
+        weighted_death_birth!(m, rng)
+        # simple_strategy_update!(m, rng)
+        push!(C_rate_vec, C_rate(m))
+    end
 
-    return death_id_vec
+    return C_rate_vec
 end
 
-function birth!(model::Model, n_birth::Int, rng::MersenneTwister)::Vector{Int}
-    parent_id_vec = pick_agents(model, n_birth, :payoff_positive, rng)
+function average_C_neighbour_rate(relation_mat::Matrix{Float64}, strategy_vec::Vector{Strategy})::Float64
+    N = length(strategy_vec)
+    degree_vec = mat_degree(relation_mat)
+    
+    sum_C_neighbour_rate = 0.0
+    C_count = 0
 
-    append!(model.strategy_vec, fill(D, n_birth))
-    append!(model.payoff_vec, zeros(Float64, n_birth))
-    model.weights = add_vertices(model.weights, n_birth)
+    for i in 1:N
+        if strategy_vec[i] == C && degree_vec[i] > 0
+            C_neighbour_rate = sum(relation_mat[i, strategy_vec .== C] .> 0) / degree_vec[i]
+            @assert 0 ≤ C_neighbour_rate ≤ 1
+            sum_C_neighbour_rate += C_neighbour_rate
+            C_count += 1
+        end
+    end
 
-    return parent_id_vec
+    return C_count == 0 ? 0.0 : sum_C_neighbour_rate / C_count
 end
 
-function imitate_relationship_conformist_bias!(model::Model, rng::MersenneTwister)::Nothing
-    N = nv(model.weights)
+function resource_allocation!(m::Model, rng::MersenneTwister)::Nothing
+    if m.p.peak_node_variability < 0
+        m.peak_node = rand(rng, 1:m.p.N)
+    elseif m.p.peak_node_variability == 0
+        # peak_node is not moved
+    else
+        m.peak_node = mod(m.peak_node + rand(rng, -m.p.peak_node_variability:m.p.peak_node_variability) - 1, m.p.N) + 1
+    end
+    
+    distance_vec = [abs(i - m.peak_node) for i in 1:m.p.N]
+    distance_vec = [distance > m.p.N ÷ 2 ? m.p.N - distance : distance for distance in distance_vec]
+    m.resource_vec = [m.p.peak_node_resource - (m.p.resource_decrement_factor * distance) for distance in distance_vec]
+    m.resource_vec = [max(r, 0) for r in m.resource_vec]
 
-    # calc edge shortage
-    as_is_edge_count = ne(model.weights)
-    to_be_edge_count = round(Int, N * model.param.k₁ / 2)
-    edge_shortage = to_be_edge_count - as_is_edge_count
-    edge_shortage <= 0 && return
+    return
+end
 
-    # pick solitary nodes
-    orphan_id_vec = findall(==(0), vec(sum(model.weights, dims = 1)))
-    length(orphan_id_vec) <= 0 && return
+function weighted_interaction!(m::Model, rng::MersenneTwister)::Vector{Tuple{Int, Int}}
+    id_pair_vec = Vector{Tuple{Int, Int}}()
 
-    # k = max(round(Int, edge_shortage / length(orphan_id_vec)), model.param.k₁)
-    k = round(Int, edge_shortage / length(orphan_id_vec))
+    for focal_id in shuffle(rng, 1:m.p.N)
+        # focal と他のエージェントとの関係ベクトル
+        relation_vec = m.relation_mat[focal_id, :]
+        sum(relation_vec) == 0 && continue
 
-    for orphan_id in orphan_id_vec
-        # for popular_id in pick_agents(model, k, :degree, rng)
-        for popular_id in pick_agents(model, k, :weight, rng)
-            if popular_id != orphan_id
-                update_weight!(model.weights, popular_id, orphan_id, model.param.w₁)
+        # opponent を選択 (関係が深いエージェントが選ばれやすい)
+        opponent_id = sample(rng, 1:m.p.N, Weights(relation_vec))
+        # opponent_id = rand(rng, filter(!=(focal_id), 1:m.p.N))
+        push!(id_pair_vec, (focal_id, opponent_id))
+
+        # focal と opponent が拠出可能なリソース
+        focal_resource, opponent_resource = [contributable_resource(r, m.resource_limit_vec[m.t]) for r in m.resource_vec[[focal_id, opponent_id]]]
+
+        # Pair-wise PGG
+        strategy_pair = m.strategy_vec[[focal_id, opponent_id]]
+        if strategy_pair == [C, C]
+            pool_resource = (focal_resource + opponent_resource) * m.p.b
+            m.resource_vec[focal_id] += pool_resource / 2 - focal_resource
+            m.resource_vec[opponent_id] += pool_resource / 2 - opponent_resource
+        elseif strategy_pair == [C, D]
+            pool_resource = focal_resource * m.p.b
+            m.resource_vec[focal_id] += pool_resource / 2 - focal_resource
+            m.resource_vec[opponent_id] += pool_resource / 2
+        elseif strategy_pair == [D, C]
+            pool_resource = opponent_resource * m.p.b
+            m.resource_vec[focal_id] += pool_resource / 2
+            m.resource_vec[opponent_id] += pool_resource / 2 - opponent_resource
+        end
+
+        # Update relationship
+        if strategy_pair == [C, C]
+            m.relation_mat[focal_id, opponent_id] *= m.p.relationship_increment_factor
+        else
+            m.relation_mat[focal_id, opponent_id] /= m.p.relationship_increment_factor
+        end
+        m.relation_mat[focal_id, opponent_id] = max(m.relation_mat[focal_id, opponent_id], 1.0)
+        m.relation_mat[opponent_id, focal_id] = m.relation_mat[focal_id, opponent_id]
+    end
+
+    return id_pair_vec
+end
+
+function contributable_resource(resource::Float64, resource_limit::Float64)::Float64
+    # 全リソースを拠出するパターン
+    # return resource
+    # 余剰リソースを拠出するパターン
+    return max(resource - resource_limit, 0)
+    # リソースリミットを超えている場合は余剰リソースを拠出し、リソースリミットを下回っている場合は全リソースを拠出するパターン
+    # return resource - (resource > resource_limit ? resource_limit : 0)
+end
+
+function simple_strategy_update!(m::Model, rng::MersenneTwister)::Vector{Int}
+    death_id_vec, parent_id_vec = get_death_parent_id_vec(m, rng)
+    length(death_id_vec) == 0 && return []
+
+    parent_strategy_vec = m.strategy_vec[parent_id_vec]
+    m.strategy_vec[death_id_vec] .= [rand(rng) > m.p.μ ? s : mutate(s) for s in parent_strategy_vec]
+
+    mutated_id_vec = death_id_vec[m.strategy_vec[death_id_vec] .!= parent_strategy_vec]
+
+    return mutated_id_vec
+end
+
+function weighted_death_birth!(m::Model, rng::MersenneTwister)::Tuple{Vector{Int}, Vector{Int}, Int, Int}
+    death_id_vec, parent_id_vec = get_death_parent_id_vec(m, rng)
+    death_count = length(death_id_vec)
+    if death_count == 0
+        return death_id_vec, parent_id_vec, 0, 0
+    end
+
+    # Strategy
+    parent_strategy_vec = m.strategy_vec[parent_id_vec]
+    prev_C_count = sum(m.strategy_vec .== C)
+    prev_mutation_C_count = sum(parent_strategy_vec .== C)
+    parent_strategy_vec = [rand(rng) > m.p.μ ? s : mutate(s) for s in parent_strategy_vec]
+    m.strategy_vec[death_id_vec] .= parent_strategy_vec
+    mutation_C_count = sum(parent_strategy_vec .== C) - prev_mutation_C_count
+    increase_C_count = sum(m.strategy_vec .== C) - prev_C_count
+
+    # Graph
+    ## Delete edges
+    m.relation_mat[death_id_vec, :] .= 0.0
+    m.relation_mat[:, death_id_vec] .= 0.0
+
+    ## Add edges
+    add_count = Int(m.p.N * m.p.k₀ / 2 - mat_ne(m.relation_mat))
+
+    ### initialize non_neighbors_dict and candidate_id_dict
+    all_nodes = collect(1:m.p.N)
+    parent_id_set = Set(parent_id_vec)
+    non_neighbors_dict = Dict{Int, Vector{Int}}()
+    candidates_dict = Dict{Int, Vector{Int}}()
+    for death_id in death_id_vec
+        non_neighbors_dict[death_id] = filter(!=(death_id), all_nodes)
+        candidates_dict[death_id] = filter(in(parent_id_set), non_neighbors_dict[death_id])
+    end
+
+    while add_count > 0
+        for death_id in death_id_vec
+            # parent_id の候補から parent_id をランダムに選択
+            if isempty(candidates_dict[death_id])
+                candidates_dict[death_id] = non_neighbors_dict[death_id]
             end
+            parent_id = rand(rng, candidates_dict[death_id])
+
+            # update relationship graph
+            mat_update_weight!(m.relation_mat, parent_id, death_id, m.p.w₀)
+
+            # update non_neighbors_dict and candidates_dict
+            non_neighbors_dict[death_id] = filter(!=(parent_id), non_neighbors_dict[death_id])
+            candidates_dict[death_id] = filter(!=(parent_id), candidates_dict[death_id])
+            if parent_id in death_id_vec
+                non_neighbors_dict[parent_id] = filter(!=(death_id), non_neighbors_dict[parent_id])
+                candidates_dict[parent_id] = filter(!=(death_id), candidates_dict[parent_id])
+            end
+
+            add_count -= 1
+            add_count == 0 && break
         end
     end
 
-    return
+    @assert m.p.N * m.p.k₀ / 2 == mat_ne(m.relation_mat) "$(m.p.N * m.p.k₀ / 2) == $(mat_ne(m.relation_mat))"
+
+    return death_id_vec, parent_id_vec, increase_C_count, mutation_C_count
 end
 
-function imitate_strategy_conformist_bias!(model::Model, n_birth::Int, rng::MersenneTwister)::Nothing
-    N = nv(model.weights)
+function get_death_parent_id_vec(m::Model, rng::MersenneTwister)::Tuple{Vector{Int}, Vector{Int}}
+    death_id_vec = findall(<(m.resource_limit_vec[m.t]), m.resource_vec)
+    death_count = length(death_id_vec)
+    parent_id_vec = Int[]
 
-    for i in (N - n_birth + 1):N
-        model.strategy_vec[i] = local_cooperation_rate(model, i) > 0.5 ? C : D
-
-        # mutation
-        if rand(rng) < model.param.μ
-            model.strategy_vec[i] = invert(model.strategy_vec[i])
-        end
+    if death_count > 0
+        parent_weights = regularize_resource_vec(m.resource_vec, true)
+        parent_id_vec = sample(rng, 1:m.p.N, parent_weights, death_count, replace = false)
     end
 
-    return
+    return shuffle(rng, death_id_vec), shuffle(rng, parent_id_vec)
 end
 
-function imitate_strategy_payoff_bias!(model::Model, parent_id_vec::Vector{Int}, rng::MersenneTwister)::Nothing
-    # parent_id_vec がペイオフバイアスで選択されていることが前提となっている。
-    N = nv(model.weights)
-    n_birth = length(parent_id_vec)
-    child_id_vec = collect((N - n_birth + 1):N)
+function regularize_resource_vec(resource_vec::Vector{Float64}, positive::Bool)::Weights
+    weights = positive ? resource_vec .- minimum(resource_vec) : maximum(resource_vec) .- resource_vec
+    weights .+= 0.0001
+    weights ./= maximum(weights)
 
-    for (parent_id, child_id) in zip(parent_id_vec, child_id_vec)
-        model.strategy_vec[child_id] = model.strategy_vec[parent_id]
-
-        # mutation
-        if rand(rng) < model.param.μ
-            model.strategy_vec[child_id] = invert(model.strategy_vec[child_id])
-        end
-    end
-
-    return
+    return Weights(weights)
 end
 
-function run_one_step!(model::Model, t::Int)::Nothing
-    model.t = t
-    model.payoff_vec .= 0.0
+mutate(strategy::Strategy)::Strategy = (strategy == C ? D : C)
+# mutate(strategy::Strategy)::Strategy = rand([C, D])
 
-    interaction!(model, model.param.rng)
-    n_death, n_birth = get_n_death_birth(model)
-    death!(model, n_death, model.param.rng)
-    parent_id_vec = birth!(model, n_birth, model.param.rng)
-    imitate_relationship_conformist_bias!(model, model.param.rng)
-    imitate_strategy_conformist_bias!(model, n_birth, model.param.rng)
-    # imitate_strategy_payoff_bias!(model, parent_id_vec, model.param.rng)
-end
+C_rate(m::Model)::Float64 = mean(m.strategy_vec .== C)
 
-cooperation_rate(model::Model)::Float64 = sum(model.strategy_vec .== C) / length(model.strategy_vec)
-
-function local_cooperation_rate(model::Model, node_id::Int)::Float64
-    neighbor_id_vec = neighbors(model.weights, node_id)
-    n_neighbor = length(neighbor_id_vec)
-    n_neighbor == 0 && return 0.0
-
-    n_neighbor_C = count(model.strategy_vec[neighbor_id_vec] .== C)
-
-    return n_neighbor_C / n_neighbor
-end
-
-function local_cooperation_rate(model::Model)::Float64
-    cooperation_rate(model) == 0.0 && return 0.0
-
-    N = nv(model.weights)
-    C_index_vec = filter(node_id -> model.strategy_vec[node_id] == C, 1:N)
-    local_cooperation_rate_vec = [local_cooperation_rate(model, node_id) for node_id in C_index_vec]
-
-    return mean(local_cooperation_rate_vec)
-end
-
-function run(param::Param, N_vec::Vector{Int}, payoff_table_vec::Vector{PayoffTable})::RunOutput
-    @assert param.t_max + 1 == length(N_vec)
-    @assert param.t_max == length(payoff_table_vec)
-
-    cooperation_rate_matrix = fill(0.0, param.t_max, param.trial_max)
-    mean_degree_matrix = fill(0.0, param.t_max, param.trial_max)
-    std_degree_matrix = fill(0.0, param.t_max, param.trial_max)
-    local_cooperation_rate_matrix = fill(0.0, param.t_max, param.trial_max)
-
-    for trial in 1:param.trial_max
-        model = Model(param, N_vec, payoff_table_vec)
-
-        for t = 1:(model.param.t_max)
-            run_one_step!(model, t)
-
-            cooperation_rate_matrix[t, trial] = cooperation_rate(model)
-            degree_vec = degree(model.weights)
-            mean_degree_matrix[t, trial] = mean(degree_vec)
-            std_degree_matrix[t, trial] = std(degree_vec)
-            local_cooperation_rate_matrix[t, trial] = local_cooperation_rate(model)
-        end
-    end
-
-    return cooperation_rate_matrix, mean_degree_matrix, std_degree_matrix, local_cooperation_rate_matrix
-end
-
-function run(param::Param, N_vec::Vector{Int}, T::Float64, S::Float64)::RunOutput
-    payoff_table = Dict((C, C) => (1.0, 1.0), (C, D) => (S, T), (D, C) => (T, S), (D, D) => (0.0, 0.0))
-    payoff_table_vec = fill(payoff_table, param.t_max)
-
-    return run(param, N_vec, payoff_table_vec)
-end
+average_resource(m::Model)::Float64 = mean(m.resource_vec)
 
 end  # end of module

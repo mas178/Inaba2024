@@ -1,44 +1,26 @@
-# Environmental variability promotes cooperative group formation
+# Environmental variability promotes the evolution of cooperation among geographically dispersed groups on dynamic networks
 
 This repository contains all the source code utilized in the following study:
 
-- **Title**: Environmental variability promotes cooperative group formation
-- **Author**: (Author Name)
-- **Published**: (Published Date)
-- **Journal**: (Journal Name)
-- **DOI**: (DOI Link)
+- **Title**: Environmental variability promotes the evolution of cooperation among geographically dispersed groups on dynamic networks
+- **Author**: [Masaaki Inaba](https://www.researchgate.net/profile/Masaaki-Inaba-3), Eizo Akiyama
+- **Published**: Under review
+- **Journal**: Preprint (arXiv)
+- **DOI**: https://doi.org/10.48550/arXiv.2411.12348
+- **Citation**: Inaba, M., & Akiyama, E. (2024). Environmental variability promotes the evolution of cooperation among geographically dispersed groups on dynamic networks. arXiv preprint arXiv:2411.12348.
 
 ## Abstract
 
-中期旧石器時代の環境変動が非常に激しかった時期に、ヒトの協力関係の範囲が大きく拡大した可能性が指摘されている (e.g., Potts, 2018)。しかし、この一致から直接的な因果関係を導き出すのは難しい。本研究では、Agent-Basedモデルによって、環境変動の激しさが、協力の進化および集団形成に与える影響を明らかにした。環境変動はシンプルな自己回帰モデルで表現し、環境変動が人口変動に影響するシナリオと、利得構造に影響するシナリオを検証した。その結果、環境変動が激しい方が、協力的な集団の形成が促進されることが確認された。特に、強い繋がりで結ばれた協力的な小集団が起点となって、協力が広がっていくことが分かった。本研究で明らかとなった、環境変動が協力的集団の拡大を促進するメカニズムが、中期旧石器時代に実際に起こった変化をどの程度説明できるかについては、今後の研究課題である。
+The evolutionary process that led to the emergence of modern human behaviors during the Middle Stone Age in Africa remains enigmatic.
+While various hypotheses have been proposed, we offer a new perspective that integrates the variability selection hypothesis (VSH) with the evolution of cooperation among human groups.
+The VSH suggests that human adaptability to fluctuating environments was a primary force driving the development of key evolutionary traits.
+However, the mechanisms by which environmental variability (EV) influenced human evolution, particularly the emergence of large-scale and complex cooperative behaviors, are not yet fully understood.
+To explore the connection between intensified EV and the evolution of intergroup cooperation, we analyzed three stochastic models of EV:
+(i) Regional Variability (RV), where resource-rich areas shift while overall resource levels remain stable;
+(ii) Universal Variability (UV), where overall resource levels fluctuate but resource-rich areas remain stable; and
+(iii) Combined Variability (CV), where both resource-rich areas shift and overall resource levels fluctuate.
+Our results show that RV strongly promotes cooperation, while UV has a comparatively weaker effect.
+Additionally, our findings indicate that the coevolution of cooperation and network structures is crucial for EVs to effectively promote cooperation.
+This study proposes a novel causal link between EV and the evolution of cooperation, potentially setting a new direction for both theoretical and empirical research in this field.
 
-## How to execute
-
-```
-cd Inaba2024
-
-# 1. Run simulation
-make run
-
-# 2. Run tests
-make test
-
-# 3. Format all source code
-make format
-
-# 4. Profile performance
-make profiling
-
-# 5. Update packages
-make update
-
-# Run 2 〜 5
-make all
-
-# Coverage
-julia --project=../Inaba2024 --code-coverage test/Ar1Test.jl
-julia --project=../Inaba2024 test/Coverage.jl
-genhtml coverage.lcov --output-directory coverage
-open -a "Google Chrome" coverage/index.html
-# covファイルの削除
-```
+![Fig.1](notebook/img/Fig1.png)
