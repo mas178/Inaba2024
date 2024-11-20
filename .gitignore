@@ -4,7 +4,6 @@
 **/.vscode/
 **/*.iml
 **/*.log
-**/*.png
 **/*.csv
 **/*.zip
 **/*.jld2
